@@ -999,7 +999,7 @@ export default function App() {
               <footer className="absolute bottom-8 w-full flex justify-center gap-6 z-10">
                 <a 
                   className="flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors text-xs font-semibold" 
-                  href="https://github.com/GreenhandTan/FRP-ALL-IN-ONE" 
+                  href="https://github.com/newbietan/FRP-ALL-IN-ONE"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -1010,7 +1010,7 @@ export default function App() {
                 </a>
                 <a 
                   className="flex items-center gap-1.5 text-on-surface-variant hover:text-primary transition-colors text-xs font-semibold" 
-                  href="https://github.com/GreenhandTan" 
+                  href="https://github.com/newbietan"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -1399,7 +1399,7 @@ export default function App() {
                   <div className="border-t border-border-subtle pt-4 flex flex-col gap-1">
                     <a 
                       className="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-slate-100 rounded-lg text-xs font-semibold transition-all" 
-                      href="https://github.com/GreenhandTan/FRP-ALL-IN-ONE" 
+                      href="https://github.com/newbietan/FRP-ALL-IN-ONE"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
@@ -1408,7 +1408,7 @@ export default function App() {
                     </a>
                     <a 
                       className="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-slate-100 rounded-lg text-xs font-semibold transition-all" 
-                      href="https://github.com/GreenhandTan" 
+                      href="https://github.com/newbietan"
                       target="_blank"
                       rel="noopener noreferrer"
                     >

@@ -3,8 +3,8 @@
   <p>基於 Web 的全容器化 FRP 内網穿透集中管理系統：用現代化瀏覽器完成 <b>FRPS 服務端配置</b>、<b>設備一鍵容器化入網</b>、<b>端口映射管理</b>，並提供<b>秒級實時流量與系統資源監控</b>。</p>
   <p><b>全容器化架構 · 騰訊雲公開鏡像極速拉取 · 內置定制 FRP v0.71.1 核心</b></p>
   <p>
-    <a href="https://github.com/GreenhandTan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/GreenhandTan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
-    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GreenhandTan/FRP-ALL-IN-ONE?style=flat"></a>
+    <a href="https://github.com/newbietan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/newbietan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/newbietan/FRP-ALL-IN-ONE?style=flat"></a>
     <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white">
     <img alt="Podman" src="https://img.shields.io/badge/Podman-892CA0?style=flat&logo=podman&logoColor=white">
     <img alt="FRP Core" src="https://img.shields.io/badge/FRP_Core-v0.71.1-00ADD8?style=flat">
@@ -17,7 +17,6 @@
     <a href="#architecture">架構說明</a> ·
     <a href="#quick-start-server">服務端部署</a> ·
     <a href="#ports">端口放行</a> ·
-    <a href="#maintainer">維護者發版</a> ·
     <a href="#license">開源協議</a>
   </p>
   <p>
@@ -120,7 +119,7 @@ flowchart TB
 直接在服務器執行自動化部署腳本（自動識別系統、就緒 Docker/Podman 並從騰訊雲鏡像源秒級拉取啟動）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
 ```
 
 腳本將引導填寫 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET` 以及**初始管理員 GitHub 用戶名**（開啟防搶佔防護）。
@@ -135,7 +134,7 @@ curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/de
 mkdir -p frp-manager && cd frp-manager
 
 # 下載標準化 compose 編排文件
-curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
 
 # 創建環境變量配置文件
 cat > .env <<EOF
@@ -168,33 +167,6 @@ docker compose up -d
 | **443** | TCP | Web 控制台 HTTPS 訪問（啟用 HTTPS 後可選） |
 | **7000** | TCP | FRP 穿透隧道主連接端口 |
 | **自定義區間** | TCP/UDP | 你映射出的遠程服務端口（如 6001、8081 等） |
-
----
-
-<a id="maintainer"></a>
-
-## 開源維護者發版說明
-
-本項目為開源維護者提供了一鍵全自動流水線，只需執行一行命令，即可完成定制版核心編譯、前端打包，並全量推送到騰訊雲公開鏡像倉庫：
-
-```bash
-# 構建並全量推送到騰訊雲 TCR (frp-server, frp-agent)
-bash deploy/build-and-push.sh [版本Tag，默認 latest]
-```
-
-發布前，請在騰訊雲控制台將 `frp-server`、`frp-agent` 兩個鏡像倉庫分別設為**公開**。首次推送新倉庫時不要假設預設公開；推送成功不代表可以匿名拉取。
-
-- Actions 的 `TCR_USERNAME`、`TCR_PASSWORD` 僅供維護者推送，最終使用者無需登入鏡像倉庫。
-- 鏡像工作流程會在獨立 runner 上使用空憑證設定匿名拉取兩個鏡像，版本發布同時驗證版本標籤和 `latest`。驗證失敗時工作流程報錯，不會自動修改騰訊雲倉庫權限。
-- 修正可見性後，可在 Actions 中重跑失敗的匿名驗證任務，無需移動既有版本標籤。
-
-維護者也可在已安裝 Docker 的機器上執行匿名驗收（不會改動既有登入設定）：
-
-```bash
-bash deploy/check-public-images.sh \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
-```
 
 ---
 

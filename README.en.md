@@ -3,8 +3,8 @@
   <p>A web-based, fully containerized FRP reverse proxy management platform: configure <b>FRPS server</b>, <b>onboard client devices via containers</b>, manage <b>port mappings</b>, and view <b>real-time streaming traffic & system resource monitoring</b> directly in your browser.</p>
   <p><b>100% Containerized Architecture · High-Speed Tencent Cloud Registry CDN · Embedded Tailored FRP v0.71.1 Core</b></p>
   <p>
-    <a href="https://github.com/GreenhandTan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/GreenhandTan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
-    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GreenhandTan/FRP-ALL-IN-ONE?style=flat"></a>
+    <a href="https://github.com/newbietan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/newbietan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/newbietan/FRP-ALL-IN-ONE?style=flat"></a>
     <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white">
     <img alt="Podman" src="https://img.shields.io/badge/Podman-892CA0?style=flat&logo=podman&logoColor=white">
     <img alt="FRP Core" src="https://img.shields.io/badge/FRP_Core-v0.71.1-00ADD8?style=flat">
@@ -17,7 +17,6 @@
     <a href="#architecture">Architecture</a> ·
     <a href="#quick-start-server">Server Deployment</a> ·
     <a href="#ports">Ports</a> ·
-    <a href="#maintainer">Maintainers</a> ·
     <a href="#license">License</a>
   </p>
   <p>
@@ -120,7 +119,7 @@ This platform uses GitHub OAuth for authentication. Create your OAuth App first:
 Run the automated deployment script on your Linux server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
 ```
 
 The script will prompt for your `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and optional `INITIAL_ADMIN_GITHUB_USERNAME` for anti-hijack protection.
@@ -135,7 +134,7 @@ If you prefer manual compose management:
 mkdir -p frp-manager && cd frp-manager
 
 # Download standard compose file
-curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
 
 # Create environment configuration
 cat > .env <<EOF
@@ -168,33 +167,6 @@ Ensure the following ports are allowed in your server's security group:
 | **443** | TCP | Web Console HTTPS access (Optional) |
 | **7000** | TCP | FRP Tunnel Control port |
 | **Custom range** | TCP/UDP | Your exposed remote service ports (e.g. 6001, 8081) |
-
----
-
-<a id="maintainer"></a>
-
-## Maintainer Release Guide
-
-For open-source maintainers, build and publish all 4 container images to the public registry with a single command:
-
-```bash
-# Build and push frp-server and frp-agent to TCR
-bash deploy/build-and-push.sh [VERSION_TAG, default: latest]
-```
-
-Before publishing, set each TCR repository (`frp-server`, `frp-agent`) to **public** in the Tencent Cloud console. Do not assume repositories created on first push are public: a successful push does not prove anonymous access.
-
-- Actions secrets `TCR_USERNAME` and `TCR_PASSWORD` are only for maintainer pushes; end users do not need registry credentials.
-- The image workflow uses separate runners and empty Docker credentials to pull both images anonymously. Versioned releases check both the version tag and `latest`. Failure fails the workflow; it does not change TCR visibility settings automatically.
-- After correcting visibility, rerun the failed verification jobs in Actions rather than moving an existing release tag.
-
-Maintainers can also verify anonymous pulls on a machine with Docker installed, without changing existing login settings:
-
-```bash
-bash deploy/check-public-images.sh \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
-```
 
 ---
 
