@@ -319,30 +319,39 @@ check_ports() {
 
 cleanup_existing_project_containers() {
     echo ""
-    echo "[CHECK] 检查并清理本项目旧容器..."
+    echo "[CHECK] 彻底清理旧容器与历史残留..."
 
-    run_compose down --remove-orphans >/dev/null 2>&1 || true
+    # 1. 尝试使用 compose down 清理
+    if [ -f "$COMPOSE_FILE" ]; then
+        run_compose down --remove-orphans >/dev/null 2>&1 || true
+    fi
 
-    removed_any="0"
+    # 2. 强制删除所有可能残留的项目容器（无论通过 docker 还是 podman）
     for container_name in $PROJECT_CONTAINERS; do
         if $CONTAINER_CLI inspect "$container_name" >/dev/null 2>&1; then
-            echo -e "${YELLOW}[WARN] 发现旧容器: ${container_name}，正在移除...${NC}"
+            echo -e "${YELLOW}[WARN] 发现旧容器: ${container_name}，正在强制清理...${NC}"
             $CONTAINER_CLI rm -f "$container_name" >/dev/null 2>&1 || true
-            removed_any="1"
         fi
     done
 
-    if [ "$removed_any" = "1" ]; then
-        echo -e "${GREEN}[OK] 旧容器已清理完成${NC}"
-    else
-        echo -e "${GREEN}[OK] 未发现本项目旧容器${NC}"
-    fi
+    # 3. 清理历史遗留的多容器独立数据卷
+    for vol in frp-all-in-one_frp-data frp-all-in-one_frp-certs frp-all-in-one_nginx-conf; do
+        if $CONTAINER_CLI volume inspect "$vol" >/dev/null 2>&1; then
+            $CONTAINER_CLI volume rm -f "$vol" >/dev/null 2>&1 || true
+        fi
+    done
+
+    # 4. 彻底重置数据目录与历史文件，保证每次部署均完全幂等
+    rm -f "$SCRIPT_DIR/frps.toml"
+    rm -rf "$SCRIPT_DIR/data"
+    mkdir -p "$SCRIPT_DIR/data"
+
+    echo -e "${GREEN}[OK] 旧容器与历史数据残留已清理完成${NC}"
 }
 
 ensure_compose_file() {
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        echo "[CONFIG] 自动生成标准单容器编排配置文件 compose.yml..."
-        cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
+    echo "[CONFIG] 写入最新标准单容器编排配置文件 compose.yml..."
+    cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
 ---
 services:
   server:
@@ -354,8 +363,7 @@ services:
     volumes:
       - ./data:/app/data
 COMPOSE_EOF
-        echo -e "${GREEN}[OK] compose.yml 已就绪${NC}"
-    fi
+    echo -e "${GREEN}[OK] compose.yml 已就绪${NC}"
 }
 
 deploy_services() {
@@ -628,6 +636,7 @@ main() {
     detect_container_stack
     ensure_container_socket
     check_memory
+    ensure_compose_file
     cleanup_existing_project_containers
     check_ports
     ensure_frps_config
