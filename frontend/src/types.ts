@@ -10,7 +10,7 @@ export enum Screen {
   CLIENT_SCRIPT = 'CLIENT_SCRIPT',
 }
 
-export type OS = 'linux' | 'windows' | 'macos' | 'docker';
+export type OS = 'linux' | 'windows' | 'macos';
 
 export interface Device {
   id: string;

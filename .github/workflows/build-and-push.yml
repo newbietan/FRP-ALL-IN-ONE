@@ -72,6 +72,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check deployment shell syntax
+        run: |
+          for script in deploy/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Check Windows uninstall syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          $path = Join-Path $env:GITHUB_WORKSPACE 'deploy/uninstall-client.ps1'
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $path, [ref]$tokens, [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Detect file changes
         id: changes
         run: |
@@ -100,7 +120,8 @@ jobs:
               core/*|deploy/frps.Dockerfile)
                 FRPS_CHANGED="true"
                 AGENT_CHANGED="true" ;;
-              agent/*)
+              agent/cmd/*|agent/internal/*|agent/go.mod|agent/go.sum|\
+              agent/Dockerfile)
                 AGENT_CHANGED="true" ;;
             esac
           done

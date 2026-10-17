@@ -29,8 +29,11 @@ PUBLIC_IP=""
 PROJECT_CONTAINERS="frp-manager-backend frp-manager-web frps"
 
 echo "========================================================"
-echo "  FRP-ALL-IN-ONE - 一键部署 (腾讯云镜像服务)"
+echo "  FRP-ALL-IN-ONE - 中国大陆设备内网穿透"
 echo "========================================================"
+echo "[INFO] 推荐境内 Linux 服务器；仅管理自有或已获授权的设备。"
+echo "[INFO] 网站服务请先核实备案要求；HTTPS 证书不能替代备案。"
+echo "[WARN] 默认 HTTP 面板请限制访问来源；长期公网访问应配置合规 HTTPS。"
 echo ""
 
 read_input() {
@@ -513,6 +516,10 @@ show_info() {
     echo "[登录方式]"
     echo "   使用 GitHub 账号登录"
     echo -e "   ${YELLOW}* 首个登录的用户将自动成为管理员${NC}"
+    echo ""
+    echo "[移除本项目（保留数据库、证书与配置）]"
+    printf '   curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | sudo bash -s -- server --dir %q\n' "$SCRIPT_DIR"
+    echo "   完整清理需在末尾加 --purge 并输入 REMOVE 确认；客户端需在各自设备上单独移除。"
     echo ""
     echo "[常用命令]"
     echo "   部署工作目录: cd $SCRIPT_DIR"

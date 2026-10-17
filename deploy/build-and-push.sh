@@ -30,41 +30,34 @@ echo ""
 
 cd "$PROJECT_ROOT"
 
-# 1. 确保各平台 Agent 二进制已编译
-echo "[1/5] 检查并编译客户端 Agent 多平台二进制..."
-if [ ! -f "agent/dist/frp-agent-linux-amd64" ] || [ ! -f "agent/dist/frp-agent-windows-amd64.exe" ]; then
-    (cd agent && make all)
-else
-    echo "   已有 agent/dist 二进制产物，跳过编译（如需更新请先在 agent 目录执行 make all）"
-fi
-
-# 2. 构建定制版 FRPS 穿透核心镜像 (v0.71.1)
+# 仅构建容器镜像，Go 编译在镜像构建阶段完成，不再要求宿主机 make all。
+# 1. 构建定制版 FRPS 穿透核心镜像 (v0.71.1)
 echo ""
-echo "[2/5] 构建专属定制版 FRPS 服务端镜像..."
+echo "[1/4] 构建专属定制版 FRPS 服务端镜像..."
 $CONTAINER_TOOL build \
     -f deploy/frps.Dockerfile \
     -t "$REGISTRY/frps:$TAG" \
     "$PROJECT_ROOT"
 
-# 3. 构建 Python 管理后端镜像 (轻量纯净版)
+# 2. 构建 Python 管理后端镜像
 echo ""
-echo "[3/5] 构建 Python 管理后台镜像..."
+echo "[2/4] 构建 Python 管理后台镜像..."
 $CONTAINER_TOOL build \
     -f server/Dockerfile \
     -t "$REGISTRY/frp-backend:$TAG" \
     "$PROJECT_ROOT"
 
-# 4. 构建 React 前端静态镜像
+# 3. 构建 React 前端静态镜像
 echo ""
-echo "[4/5] 构建 React 前端 Web 镜像..."
+echo "[3/4] 构建 React 前端 Web 镜像..."
 $CONTAINER_TOOL build \
     -f frontend/Dockerfile \
     -t "$REGISTRY/frp-frontend:$TAG" \
     "$PROJECT_ROOT/frontend"
 
-# 5. 构建客户端专属 Agent 容器镜像 (供客户端极速拉取)
+# 4. 构建客户端 Agent 容器镜像
 echo ""
-echo "[5/5] 构建客户端 Agent 容器镜像..."
+echo "[4/4] 构建客户端 Agent 容器镜像..."
 $CONTAINER_TOOL build \
     -f agent/Dockerfile \
     -t "$REGISTRY/frp-agent:$TAG" \
@@ -88,4 +81,5 @@ echo "正在推送 frp-agent..."
 $CONTAINER_TOOL push "$REGISTRY/frp-agent:$TAG"
 
 echo ""
-echo "✅ 所有镜像推送完成: $REGISTRY/*:$TAG"
+echo "[OK] 所有镜像推送完成: $REGISTRY/*:$TAG"
+echo "[INFO] 请确认四个镜像仓库均为公开；推送成功不代表可匿名下载。"

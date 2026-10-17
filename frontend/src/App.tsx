@@ -45,7 +45,6 @@ import {
   ArrowUp,
   ArrowDown,
   BookOpen, 
-  Box,
   Code,
   Search,
   Filter
@@ -54,7 +53,7 @@ import { Screen, Device, Tunnel, ServerConfig, GlobalSettings, OS } from './type
 import {
   defaultServerConfig,
   defaultGlobalSettings,
-  getOSScript
+  getClientUninstallCommand
 } from './data';
 import { APP_VERSION_DISPLAY } from './version';
 import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, isLoggedIn, setToken, clearToken } from './api';
@@ -630,13 +629,14 @@ export default function App() {
   const [installScript, setInstallScript] = useState<string>('');
   const handleSelectOS = async (os: OS) => {
     setSelectedOs(os);
+    setInstallScript('');
     try {
-      const script = await frpApi.getInstallScript(os);
+      const script = await frpApi.getInstallScript(os === 'macos' ? 'darwin' : os);
       setInstallScript(script as string);
-    } catch {
-      setInstallScript(getOSScript(os, serverConfig.ip, serverConfig.port, serverConfig.token, `dev-client-node`));
+      changeScreen(Screen.CLIENT_SCRIPT, 'none');
+    } catch (err: any) {
+      triggerToast(t(`获取安装脚本失败：${err.message}，请重试`, `Failed to load installation script: ${err.message}. Please retry.`), 'warning');
     }
-    changeScreen(Screen.CLIENT_SCRIPT, 'none');
   };
 
   // 完成部署脚本引导，返回设备列表
@@ -740,23 +740,16 @@ export default function App() {
     triggerToast(`穿透隧道 '${name}' 已成功释放.`, 'warning');
   };
 
-  // Reset demo simulator configuration
-  const _handleUninstallDevice = (id: string, name: string) => {
-    setDevices(prev => prev.map(d => d.id === id ? { ...d, status: 'offline', lastSeen: '已断开' } : d));
-    setTunnels(prev => prev.map(t => t.deviceId === id ? { ...t, status: 'offline' } : t));
-    triggerToast(`FRP 客户端 agent '${name}' 已安全停用并离线.`, 'warning');
-  };
-  void _handleUninstallDevice;
-
   const handleDeleteDevice = async (deviceId: string, deviceName: string) => {
     try {
       await clientsApi.delete(deviceId);
-    } catch (_err) {
-      void _err;
+    } catch (err: any) {
+      triggerToast(t(`注销失败：${err.message}`, `Failed to unregister: ${err.message}`), 'warning');
+      return;
     }
     setDevices(prev => prev.filter(d => d.id !== deviceId));
     setTunnels(prev => prev.filter(t => t.deviceId !== deviceId));
-    triggerToast(t(`设备 '${deviceName}' 及其关联隧道端口已被安全卸载从系统中释放.`, `Device '${deviceName}' and all associated tunnels unmounted from the database.`), 'warning');
+    triggerToast(t(`已注销设备 '${deviceName}' 及关联隧道；远端容器请使用卸载命令移除。`, `Device '${deviceName}' and its tunnels were unregistered. Remove the remote container using the uninstall command.`), 'warning');
   };
 
   const handleEditDeviceName = async (device: Device) => {
@@ -853,6 +846,9 @@ export default function App() {
   const handleSaveSettings = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     try {
+      if (enableAutoHttps && !tempDomain.trim()) {
+        throw new Error(t('启用 HTTPS 前请填写面板域名并完成适用的备案要求', 'Enter a panel hostname and meet applicable filing requirements before enabling HTTPS'));
+      }
       // 保存域名
       if (tempDomain) {
         await settingsApi.setDomain(tempDomain);
@@ -862,7 +858,10 @@ export default function App() {
       // 处理 TLS 开关（仅在状态变化或域名变化时触发，避免重复申请证书）
       if (enableAutoHttps && tempDomain) {
         if (!savedTlsEnabled || tempDomain !== savedDomain) {
-          await settingsApi.enableTls(tempDomain);
+          const result = await settingsApi.enableTls(tempDomain);
+          if (!(result as { success?: boolean }).success) {
+            throw new Error((result as { message?: string }).message || 'HTTPS 配置失败');
+          }
           setSavedTlsEnabled(true);
           setSavedDomain(tempDomain);
         }
@@ -878,14 +877,14 @@ export default function App() {
         ...prev,
         dashboardPort: tempDashboardPort ? Number(tempDashboardPort) : 0,
       }));
-      triggerToast(t('全局及系统设置参数已同步写入 frps.ini 系统配置文件!', 'All network options and core bindings successfully written onto frps.ini configuration file!'), 'success');
+      triggerToast(t('设置已保存；启用域名或 HTTPS 后请同步修改 GitHub OAuth 回调地址。', 'Settings saved. Update your GitHub OAuth callback URL after changing the domain or HTTPS.'), 'success');
     } catch (err: any) {
       triggerToast(`保存失败: ${err.message}`, 'warning');
     }
   };
 
   const handleDiscardSettings = () => {
-    setTempDomain(serverConfig.domain || 'frp.mydomain.com');
+    setTempDomain(serverConfig.domain || '');
     setTempDashboardPort(globalSettings.dashboardPort ? String(globalSettings.dashboardPort) : '');
     triggerToast(t('放弃未保存修改并返回控制面板概览', 'Discarded unsaved change logs, redirected back to Overview'), 'info');
     changeScreen(Screen.DASHBOARD, 'none');
@@ -1055,7 +1054,7 @@ export default function App() {
                 {/* Header */}
                 <div className="px-8 py-6 border-b border-border-subtle flex flex-col items-center text-center">
                   <h1 className="font-headline-lg text-headline-lg text-on-surface">{t('初始化向导', 'Initialization Wizard')}</h1>
-                  <p className="font-body-md text-body-md text-on-surface-variant mt-2">{t('请选择您的部署模式', 'Please select your deployment mode')}</p>
+                  <p className="font-body-md text-body-md text-on-surface-variant mt-2">{t('面向中国大陆境内设备，推荐使用境内 Linux 服务器', 'For devices in mainland China; use a mainland Linux server')} </p>
                 </div>
                 {/* Content */}
                 <div className="p-8 flex-grow">
@@ -1073,8 +1072,8 @@ export default function App() {
                           {serverConfig.mode === 'ip' && <div className="w-2.5 h-2.5 rounded-full bg-primary"></div>}
                         </div>
                       </div>
-                      <h3 className="font-headline-sm text-headline-sm text-on-surface mb-2">{t('IP 直连模式', 'IP Direct Connect Mode')}</h3>
-                      <p className="font-body-md text-body-md text-on-surface-variant">{t('通过服务器公网 IP 直接访问管理面板和穿透服务。', 'Direct access to admin panel and proxy channels via server Public IP.')}</p>
+                      <h3 className="font-headline-sm text-headline-sm text-on-surface mb-2">{t('IP 直连（基础配置）', 'IP access (basic setup)')}</h3>
+                      <p className="font-body-md text-body-md text-on-surface-variant">{t('使用公网 IP 配置 TCP/UDP 穿透。HTTP 面板仅适合受限访问或初始配置，不应作为长期公网明文入口。', 'Configure TCP/UDP tunnels using the public IP. Restrict HTTP panel access; do not use plaintext HTTP for long-term public administration.')}</p>
                     </div>
 
                     {/* Option 2: Domain Mode */}
@@ -1090,8 +1089,8 @@ export default function App() {
                           {serverConfig.mode === 'domain' && <div className="w-2.5 h-2.5 rounded-full bg-primary"></div>}
                         </div>
                       </div>
-                      <h3 className="font-headline-sm text-headline-sm text-on-surface mb-2">{t('域名模式', 'Custom Domain Mode')}</h3>
-                      <p className="font-body-md text-body-md text-on-surface-variant">{t('通过自定义域名访问，支持自动申请 Let\'s Encrypt HTTPS 证书。', 'Access through your own domain name. Supports automated Let\'s Encrypt SSL/TLS certificates setup.')}</p>
+                      <h3 className="font-headline-sm text-headline-sm text-on-surface mb-2">{t('域名与 HTTPS（可选）', 'Domain and HTTPS (optional)')}</h3>
+                      <p className="font-body-md text-body-md text-on-surface-variant">{t('境内网站应先按接入商要求完成备案，再配置域名与 HTTPS。证书不能替代备案，IP 或非标准端口也不能作为规避依据。', 'Meet your mainland hosting provider’s filing requirements before domain/HTTPS setup. A certificate, IP address or alternate port is not a filing exemption.')}</p>
                     </div>
                   </div>
 
@@ -1998,12 +1997,12 @@ export default function App() {
                                             </button>
                                             <button
                                               onClick={() => {
-                                                if (confirm(t(`确定从管理控制台中移除 ${device.name} 吗？此操作不可逆。`, `Warning: Are you sure you want to permanently detach '${device.name}' from the manager?`))) {
+                                                if (confirm(t(`确定注销 ${device.name} 及其隧道吗？此操作不会卸载远端容器，请另行执行客户端卸载命令。`, `Unregister '${device.name}' and its tunnels? This does not uninstall the remote container; run the client uninstall command separately.`))) {
                                                   handleDeleteDevice(device.id, device.name);
                                                 }
                                               }}
                                               className="p-1 px-1.5 text-outline hover:text-status-offline rounded hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
-                                              title={t('注销卸载设备', 'Uninstall Terminal')}
+                                              title={t('注销设备（不卸载远端容器）', 'Unregister device (keeps remote container)')}
                                             >
                                               <Trash2 className="w-3.5 h-3.5" />
                                             </button>
@@ -2232,36 +2231,37 @@ export default function App() {
                         {/* Left Column (Domain & NAT) */}
                         <div className="xl:col-span-2 space-y-6 lg:space-y-8">
                           
-                          {/* Section 1: Domain & HTTPS */}
-                          <section className="bg-white border border-border-subtle rounded-xl overflow-hidden relative shadow-sm">
-                            <div className="p-6 border-b border-border-subtle bg-slate-50">
+                          {/* 可选高级设置，不进入基础 TCP/UDP 部署流程 */}
+                          <details className="bg-white border border-border-subtle rounded-xl overflow-hidden relative shadow-sm">
+                            <summary className="p-6 border-b border-border-subtle bg-slate-50 cursor-pointer">
                               <div className="flex items-center gap-3 mb-2">
                                 <Globe className="w-5 h-5 text-[#006782] shrink-0" />
                                 <h3 className="font-headline font-semibold text-base text-on-surface">
-                                  {t('域名与 HTTPS 路由', 'Domain Name & HTTPS Routes')}
+                                  {t('域名与 HTTPS（可选高级设置）', 'Domain and HTTPS (optional advanced settings)')}
                                 </h3>
                               </div>
                               <p className="font-body-md text-xs text-on-surface-variant">
-                                {t('配置主泛域名并管理 SSL/TLS 证书以实现安全的外部访问。', 'Configure primary wild domain name and manage SSL/TLS certificates for safe external access.')}
+                                {t('仅用于管理面板域名与证书，不会自动为所有穿透服务申请证书。', 'Panel domain and certificate only; this does not issue certificates for every tunneled service.')}
                               </p>
-                            </div>
+                            </summary>
                             
                             <div className="p-6 space-y-6">
+                              <p className="text-xs leading-relaxed p-3 rounded bg-amber-50 text-amber-900">
+                                {t('大陆服务器提供网站服务时，请先按接入商和主管部门要求办理 ICP 备案等手续。要求不因 HTTP/HTTPS、IP 访问或更换端口而当然豁免；证书不能替代备案。未准备好时保留基础配置，并通过防火墙限制面板来源。', 'For websites hosted in mainland China, meet applicable ICP filing and hosting requirements. HTTP/HTTPS, IP access or alternate ports are not automatic exemptions. Certificates do not replace filing. Restrict panel access while preparing.')}
+                                {' '}<a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" className="underline">{t('工信部备案系统', 'MIIT filing portal')}</a>
+                              </p>
                               {/* Domain Name */}
                               <div>
                                 <label className="block font-label-md text-xs text-on-surface mb-2 font-semibold">
-                                  {t('基础域名', 'Base Domain')}
+                                  {t('管理面板完整域名', 'Full panel hostname')}
                                 </label>
                                 <div className="flex rounded shadow-sm">
-                                  <span className="inline-flex items-center px-4 rounded-l border border-r-0 border-outline-variant bg-slate-50 text-on-surface-variant font-mono text-sm select-none">
-                                    *.
-                                  </span>
                                   <input
                                     type="text"
                                     value={tempDomain}
                                     onChange={(e) => setTempDomain(e.target.value)}
-                                    className="flex-1 block w-full rounded-none rounded-r text-sm border border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary bg-white py-2 px-3 text-on-surface font-mono"
-                                    placeholder="example.com"
+                                    className="flex-1 block w-full rounded text-sm border border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary bg-white py-2 px-3 text-on-surface font-mono"
+                                    placeholder="frp.example.com"
                                   />
                                 </div>
                                 <p className="mt-2 text-xs text-on-surface-variant font-sans flex items-center gap-1.5 opacity-80 select-none">
@@ -2279,7 +2279,7 @@ export default function App() {
                                     {t('启用自动 HTTPS (Let\'s Encrypt)', 'Enable Automated HTTPS (Let\'s Encrypt)')}
                                   </label>
                                   <p className="font-body-md text-xs text-on-surface-variant leading-relaxed">
-                                    {t('自动为映射 of 子域名申请和续签 SSL 证书。', 'Automatically request and renew secure SSL certificates for generated proxy maps.')}
+                                    {t('保存设置时为上方管理面板域名申请证书；需完成适用的备案要求、DNS 解析，并允许 80 端口验证。签发服务的网络可达性由部署环境决定。', 'Saving requests a panel certificate. Meet applicable filing requirements, configure DNS and allow port 80 validation. Certificate service reachability depends on your network.')}
                                   </p>
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1 select-none">
@@ -2314,41 +2314,8 @@ export default function App() {
                                 </button>
                               </div>
                               
-                              {/* One-click Let's Encrypt */}
-                              <div>
-                                <label className="block font-label-md text-xs text-on-surface mb-2 font-semibold">
-                                  {t('一键申请 Let\'s Encrypt 证书', 'One-click Let\'s Encrypt Certificate')}
-                                </label>
-                                <button
-                                  onClick={async () => {
-                                    if (!tempDomain) {
-                                      triggerToast(t('请先填写域名', 'Please enter a domain first'), 'warning');
-                                      return;
-                                    }
-                                    try {
-                                      triggerToast(t('正在申请证书，请稍候...', 'Requesting certificate, please wait...'), 'info');
-                                      const result = await settingsApi.enableTls(tempDomain, 'auto');
-                                      if ((result as any).success) {
-                                        setEnableAutoHttps(true);
-                                        triggerToast(t('证书申请成功，HTTPS 已启用！', 'Certificate issued successfully, HTTPS enabled!'), 'success');
-                                      } else {
-                                        triggerToast(`申请失败: ${(result as any).message}`, 'warning');
-                                      }
-                                    } catch (err: any) {
-                                      triggerToast(`申请失败: ${err.message}`, 'warning');
-                                    }
-                                  }}
-                                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#006782] hover:bg-[#005a6e] text-white rounded-lg font-sans text-sm font-semibold transition-colors cursor-pointer"
-                                >
-                                  <Shield className="w-4 h-4 shrink-0" />
-                                  {t('一键申请 SSL 证书', 'Issue SSL Certificate')}
-                                </button>
-                                <p className="text-[11px] text-slate-400 font-sans mt-2">
-                                  {t('需先配置域名并确保 DNS 已解析到本服务器', 'Domain must be configured and DNS must resolve to this server')}
-                                </p>
-                              </div>
                             </div>
-                          </section>
+                          </details>
 
                           {/* Section 2: NAT Configuration */}
                           <section className="bg-white border border-border-subtle rounded-xl overflow-hidden relative shadow-sm">
@@ -2422,7 +2389,7 @@ export default function App() {
                             
                             <div className="p-5 space-y-5">
                               <p className="font-body-md text-xs text-on-surface-variant leading-relaxed">
-                                {t('系统使用 GitHub OAuth 进行多因素管理员安全接入验证。如需变更，可由主管理员在下方重新签发授权。', 'This console relies on GitHub OAuth for Multi-Factor Admin authentication. Click down here to re-authorize another developer handle.')}
+                                {t('系统使用 GitHub OAuth 登录；是否启用多因素认证由 GitHub 账号设置决定。境内部署需确保服务器与浏览器可访问 GitHub。', 'Sign-in uses GitHub OAuth; MFA depends on your GitHub account settings. Both the server and browser need GitHub access.')}
                               </p>
                               
                               <hr className="border-border-subtle" />
@@ -2505,14 +2472,15 @@ export default function App() {
                                 <span className="text-slate-200 font-semibold">{systemInfo?.start_time || '-'}</span>
                               </div>
 
-                              <button
-                                type="button"
-                                onClick={() => window.open('https://github.com/GreenhandTan/FRP-ALL-IN-ONE', '_blank', 'noopener,noreferrer')}
+                              <a
+                                href="https://github.com/newbietan/FRP-ALL-IN-ONE/releases"
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 className="w-full mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded font-bold text-xs transition-colors flex items-center justify-center gap-2 border border-slate-700 cursor-pointer select-none"
                               >
                                 <RefreshCw className="w-3.5 h-3.5 text-slate-300" />
-                                {t('手动检查核心更新', 'Check Core Updates')}
-                              </button>
+                                {t('查看项目更新', 'View project releases')}
+                              </a>
                             </div>
                           </section>
                         </div>
@@ -2534,7 +2502,7 @@ export default function App() {
                         <div className="flex items-start justify-between border-b border-border-subtle pb-4">
                           <div>
                             <h2 className="font-headline-md text-headline-md text-on-surface">{t('添加新设备', 'Add New Device')}</h2>
-                            <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('全平台通过容器极速运行，自动从腾讯云公开镜像仓库秒级拉取', 'Unified container-based deployment pulling from Tencent Cloud Registry.')}</p>
+                            <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('优先面向境内 Linux/NAS 设备；统一使用容器镜像。Windows/macOS 需自行确认虚拟机网络与镜像兼容性。', 'Linux/NAS devices in mainland China are the primary target. Windows/macOS require compatible images and VM networking.')}</p>
                           </div>
                           
                           <button 
@@ -2550,21 +2518,7 @@ export default function App() {
                         <div className="py-6 flex flex-col gap-6">
                           <div>
                             <p className="text-xs font-mono text-outline uppercase font-medium mb-3">{t('选择客户端运行环境', 'Choose Client Deployment Environment')}</p>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-
-                              {/* Docker Selector */}
-                              <div 
-                                data-os="docker"
-                                onClick={() => handleSelectOS('docker')}
-                                className="border border-border-subtle hover:border-[#2496ed] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
-                              >
-                                <div className="p-2.5 bg-[#2496ed]/10 text-[#2496ed] rounded-full">
-                                  <Box className="w-5 h-5 shrink-0" />
-                                </div>
-                                <span className="font-headline text-sm font-semibold text-on-surface">{t('Docker (推荐)', 'Docker (Fast)')}</span>
-                                <span className="text-[11px] font-mono text-outline">{t('NAS / 服务器一键命令', 'NAS / Linux One-Liner')}</span>
-                              </div>
-                              
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               {/* Linux Selector DIV XPath match */}
                               <div 
                                 data-os="linux"
@@ -2574,7 +2528,7 @@ export default function App() {
                                 <div className="p-2.5 bg-[#006782]/10 text-[#006782] rounded-full">
                                   <Terminal className="w-5 h-5 shrink-0" />
                                 </div>
-                                <span className="font-headline text-sm font-semibold text-on-surface">Linux</span>
+                                <span className="font-headline text-sm font-semibold text-on-surface">{t('Linux / NAS（推荐）', 'Linux / NAS (recommended)')}</span>
                                 <span className="text-[11px] font-mono text-outline">{t('自动安装/就绪容器', 'Auto-install Docker')}</span>
                               </div>
 
@@ -2681,7 +2635,7 @@ export default function App() {
                           <div>
                             <h2 className="font-headline-md text-headline-md text-primary font-bold">{t('客户端脚本部署', 'Client Script Quick Deploy')}</h2>
                             <p className="font-body-md text-body-md text-on-surface-variant mt-2 max-w-xl">
-                              {t('请复制下方脚本并在您的客户端机器上以 root 权限执行。脚本会自动检测架构并完成安装。', 'Please copy the shell command below and run it with root privileges inside your workspace terminal. The wizard detects cpu architectures automatically.')}
+                              {t('在目标设备上执行脚本。Linux 通常使用 root/sudo；macOS 和 Windows 请使用已启动容器环境的账号。桌面系统的虚拟机网络需额外确认。', 'Run on the target device. Linux usually requires root/sudo; use the container desktop user on macOS/Windows. Verify VM networking on desktop systems.')}
                             </p>
                           </div>
                           
@@ -2703,11 +2657,11 @@ export default function App() {
                             <div className="bg-[#161b22] px-4 py-3 border-b border-[#30363d] flex justify-between items-center">
                               <div className="flex items-center gap-2 text-[#8b949e] font-label-sm text-xs font-mono uppercase font-bold text-slate-400">
                                 <TerminalIcon className="w-4 h-4 shrink-0 text-primary-container" />
-                                <span>{selectedOs === 'docker' ? 'docker-run.sh' : (selectedOs === 'windows' ? 'install_agent.ps1' : 'install_agent.sh')}</span>
+                                <span>{selectedOs === 'windows' ? 'install_agent.ps1' : 'install_agent.sh'}</span>
                               </div>
                               <div className="flex items-center gap-2 font-sans font-medium text-xs">
                                 <button 
-                                  onClick={() => handleCopyText(installScript || getOSScript(selectedOs, serverConfig.ip, serverConfig.port, serverConfig.token, `dev-client-node`))}
+                                  onClick={() => handleCopyText(installScript)}
                                   className="flex items-center gap-1 px-3 py-1.5 rounded bg-[#21262d] hover:bg-[#30363d] text-primary-container border border-[#30363d] transition-colors cursor-pointer text-slate-300 font-sans"
                                 >
                                   <Copy className="w-3.5 h-3.5 shrink-0" />
@@ -2715,7 +2669,7 @@ export default function App() {
                                 </button>
                                 <button
                                   onClick={() => {
-                                    const script = installScript || getOSScript(selectedOs, serverConfig.ip, serverConfig.port, serverConfig.token, `dev-client-node`);
+                                    const script = installScript;
                                     const ext = selectedOs === 'windows' ? 'ps1' : 'sh';
                                     const filename = `install_agent.${ext}`;
                                     const blob = new Blob([script], { type: 'text/plain;charset=utf-8' });
@@ -2741,10 +2695,17 @@ export default function App() {
                                 readOnly
                                 className="absolute inset-0 w-full h-full bg-[#0d1117] text-cyan-400 font-mono text-sm p-4 border-none focus:ring-0 resize-none custom-scrollbar m-0 whitespace-pre text-left focus:outline-none"
                                 spellCheck="false"
-                                value={installScript || getOSScript(selectedOs, serverConfig.ip, serverConfig.port, serverConfig.token, `dev-client-node`)}
+                                value={installScript}
                               />
                             </div>
                           </div>
+
+                          <details className="p-4 rounded border border-border-subtle">
+                            <summary className="cursor-pointer font-semibold text-sm">{t('卸载本设备上的客户端', 'Uninstall the client on this device')}</summary>
+                            <p className="text-xs text-on-surface-variant my-3">{t('在客户端机器上以部署时的账号执行；默认保留配置和日志。彻底清理方法见项目文档，随后在设备列表注销记录。', 'Run on the client using the deployment account. Configuration and logs are kept by default. See the README for full cleanup, then unregister the device.')}</p>
+                            <pre className="text-xs whitespace-pre-wrap break-all bg-slate-50 p-3 rounded">{getClientUninstallCommand(selectedOs)}</pre>
+                            <button onClick={() => handleCopyText(getClientUninstallCommand(selectedOs))} className="mt-3 text-sm text-primary cursor-pointer">{t('复制卸载命令', 'Copy uninstall command')}</button>
+                          </details>
 
                           {/* Contextual Guidance */}
                           <div className="p-4 rounded bg-surface-container-low border border-border-subtle flex gap-3 items-start">
@@ -2845,9 +2806,11 @@ export default function App() {
                       onChange={(e) => setNewTunnelData(p => ({ ...p, type: e.target.value as any }))}
                     >
                       <option value="tcp">TCP</option>
-                      <option value="http">HTTP</option>
-                      <option value="https">HTTPS</option>
                       <option value="udp">UDP</option>
+                      <optgroup label={t('域名网站（需合规及额外配置）', 'Websites (filing and extra setup may apply)')}>
+                        <option value="http">HTTP</option>
+                        <option value="https">HTTPS</option>
+                      </optgroup>
                     </select>
                   </div>
                 </div>

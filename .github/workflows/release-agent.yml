@@ -27,7 +27,10 @@ on:
     branches:
       - main
     paths:
-      - 'agent/**'
+      - 'agent/cmd/**'
+      - 'agent/internal/**'
+      - 'agent/go.mod'
+      - 'agent/go.sum'
       - 'core/**'
     tags:
       - 'v*'

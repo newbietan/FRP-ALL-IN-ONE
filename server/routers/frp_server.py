@@ -342,6 +342,10 @@ async def get_agent_install_script(
     """
     import crud as crud_module
 
+    platform = "darwin" if platform == "macos" else platform
+    if platform not in {"linux", "darwin", "windows"}:
+        raise HTTPException(status_code=400, detail="请选择 linux、darwin 或 windows 容器安装脚本")
+
     auth_token = crud_module.get_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN) or "frp-token"
     server_ip = crud_module.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
     frps_port = crud_module.get_config(db, models.ConfigKeys.FRPS_PORT) or "7000"
@@ -384,22 +388,7 @@ async def get_agent_install_script(
     client_id = client.id
     client_token = client.auth_token
 
-    if platform == "docker":
-        image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
-        manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
-        cmd = (
-            f"# FRP Manager Agent - Docker 一键运行 (腾讯云 TCR 极速拉取)\n"
-            f"docker run -d \\\n"
-            f"  --name frp-agent \\\n"
-            f"  --network host \\\n"
-            f"  --restart always \\\n"
-            f"  -e FRP_AGENT_TOKEN=\"{client_token}\" \\\n"
-            f"  {image} \\\n"
-            f"  -server \"{manager_ws_url}\" \\\n"
-            f"  -id \"{client_id}\"\n"
-        )
-        return PlainTextResponse(content=cmd, media_type="text/plain")
-    elif platform == "windows":
+    if platform == "windows":
         script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host)
         return PlainTextResponse(content=script, media_type="text/plain")
     else:
@@ -457,31 +446,37 @@ serverAddr = "$SERVER_IP"
 serverPort = $FRPS_PORT
 auth.token = "$FRPS_TOKEN"
 "@
-$config | Out-File -FilePath "$INSTALL_DIR\\frpc.toml" -Encoding UTF8
 
-# 3. 清理旧容器并启动新容器
+# 3. 标记归属，供卸载脚本安全识别；使用无 BOM 的 UTF-8 配置
+[System.IO.File]::WriteAllText("$INSTALL_DIR\\frpc.toml", $config, (New-Object System.Text.UTF8Encoding($false)))
+New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Out-Null
 & $CONTAINER_CLI rm -f frp-agent 2>$null | Out-Null
 
 Write-Host "正在从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..." -ForegroundColor Yellow
 & $CONTAINER_CLI pull $IMAGE
+if ($LASTEXITCODE -ne 0) {{ throw "镜像拉取失败" }}
 
 & $CONTAINER_CLI run -d `
   --name frp-agent `
   --network host `
   --restart always `
-  -v "${{INSTALL_DIR}}\\logs:/opt/frp/logs" `
+  --label io.frp-all-in-one.role=client `
+  -v "${{INSTALL_DIR}}:/opt/frp" `
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
   $IMAGE `
   -server "$MANAGER_WS_URL" `
   -id "$CLIENT_ID" `
   -config /opt/frp/frpc.toml `
   -log /opt/frp/logs
+if ($LASTEXITCODE -ne 0) {{ throw "客户端容器启动失败" }}
 
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host "  部署成功！FRP-Agent 容器已在后台运行" -ForegroundColor Green
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
 Write-Host "查看日志: $CONTAINER_CLI logs -f frp-agent"
+Write-Host "卸载（保留配置和日志）:"
+Write-Host "& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall-client.ps1')))"
 '''
 
 
@@ -491,6 +486,8 @@ def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_to
         manager_host = server_ip
     manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
     image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
+    install_dir = "$HOME/.frp-all-in-one" if os_type == "darwin" else "/opt/frp"
+    uninstall_runner = "bash" if os_type == "darwin" else "sudo bash"
     return f'''#!/bin/bash
 # FRP Manager Agent - 容器一键部署脚本 ({os_type})
 # 架构: 自动检测/就绪 Docker 或 Podman 环境，从腾讯云公开镜像仓库拉取并启动
@@ -504,7 +501,7 @@ CLIENT_TOKEN="{client_token}"
 CLIENT_ID="{client_id}"
 IMAGE="{image}"
 MANAGER_WS_URL="{manager_ws_url}"
-INSTALL_DIR="/opt/frp"
+INSTALL_DIR="{install_dir}"
 
 RED='\\033[0;31m'
 GREEN='\\033[0;32m'
@@ -589,6 +586,7 @@ serverPort = {frps_port}
 auth.token = "{auth_token}"
 FRPC_CONFIG
 chmod 600 "$INSTALL_DIR/frpc.toml"
+touch "$INSTALL_DIR/.frp-all-in-one-client"
 log_ok "本地配置文件已创建 (0600 权限)"
 
 # 3. 清理已存在的旧 Agent 容器
@@ -603,7 +601,8 @@ $CONTAINER_CLI run -d \\
   --name frp-agent \\
   --network host \\
   --restart always \\
-  -v "$INSTALL_DIR/logs:/opt/frp/logs" \\
+  --label io.frp-all-in-one.role=client \\
+  -v "$INSTALL_DIR:/opt/frp" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
   "$IMAGE" \\
   -server "$MANAGER_WS_URL" \\
@@ -619,6 +618,8 @@ echo "容器名称: frp-agent"
 echo "客户端 ID: $CLIENT_ID"
 echo "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
 echo "查看日志: $CONTAINER_CLI logs -f frp-agent"
+echo "卸载（保留配置和日志）:"
+echo "curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | {uninstall_runner} -s -- client"
 '''
 
 

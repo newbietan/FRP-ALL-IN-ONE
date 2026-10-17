@@ -1,228 +1,132 @@
 <div align="center">
   <h1>FRP-ALL-IN-ONE</h1>
-  <p>基於 Web 的全容器化 FRP 内網穿透集中管理系統：用現代化瀏覽器完成 <b>FRPS 服務端配置</b>、<b>設備一鍵容器化入網</b>、<b>端口映射管理</b>，並提供<b>秒級實時流量與系統資源監控</b>。</p>
-  <p><b>全容器化架構 · 騰訊雲公開鏡像極速拉取 · 內置定制 FRP v0.71.1 核心</b></p>
-  <p>
-    <a href="https://github.com/GreenhandTan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/GreenhandTan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
-    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GreenhandTan/FRP-ALL-IN-ONE?style=flat"></a>
-    <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white">
-    <img alt="Podman" src="https://img.shields.io/badge/Podman-892CA0?style=flat&logo=podman&logoColor=white">
-    <img alt="FRP Core" src="https://img.shields.io/badge/FRP_Core-v0.71.1-00ADD8?style=flat">
-    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white">
-    <img alt="React" src="https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black">
-  </p>
-  <p>
-    <a href="#highlights">核心優勢</a> ·
-    <a href="#demo">效果展示</a> ·
-    <a href="#architecture">架構說明</a> ·
-    <a href="#quick-start-server">服務端部署</a> ·
-    <a href="#ports">端口放行</a> ·
-    <a href="#maintainer">維護者發版</a> ·
-    <a href="#license">開源協議</a>
-  </p>
-  <p>
-    <a href="README.md">简体中文</a> |
-    <a href="README.en.md">English</a> |
-    <a href="README.zh-TW.md">繁體中文</a>
-  </p>
+  <p>面向中國大陸境內自有設備的容器化內網穿透管理工具。</p>
+  <p>Linux/NAS 客戶端 · TCP/UDP 映射 · Web 管理 · 騰訊雲公開鏡像</p>
+  <p><a href="README.md">简体中文</a> | <a href="README.en.md">English</a> | <a href="README.zh-TW.md">繁體中文</a></p>
 </div>
 
-<a id="demo"></a>
+## 介面預覽
 
-## 效果展示
-
-<p align="center">
-  <img src="demo1.png" alt="控制面板預覽" width="850" />
-</p>
+<p align="center"><img src="demo1.png" alt="控制面板預覽" width="850" /></p>
 
 <details>
-  <summary><b>點擊展開查看更多功能介面截圖</b></summary>
-  <br />
+  <summary>展開更多介面截圖</summary>
   <table>
     <tr>
-      <td align="center" width="50%"><img src="demo2.png" alt="設備與隧道狀態" /><br /><sub><b>設備與隧道狀態管理</b></sub></td>
-      <td align="center" width="50%"><img src="demo3.png" alt="容器部署向導" /><br /><sub><b>添加設備與容器向導</b></sub></td>
+      <td width="50%"><img src="demo2.png" alt="設備與隧道" /></td>
+      <td width="50%"><img src="demo3.png" alt="設備接入" /></td>
     </tr>
     <tr>
-      <td align="center" width="50%"><img src="demo4.png" alt="系統設置" /><br /><sub><b>HTTPS 與網路配置</b></sub></td>
-      <td align="center" width="50%"><img src="demo5.png" alt="移動端適配" /><br /><sub><b>移動端與日誌監控</b></sub></td>
+      <td width="50%"><img src="demo4.png" alt="系統設定" /></td>
+      <td width="50%"><img src="demo5.png" alt="行動裝置介面" /></td>
     </tr>
   </table>
 </details>
 
----
+## 項目範圍
 
-<a id="highlights"></a>
+- **主要場景**：使用中國大陸境內 Linux 雲伺服器，連接同在境內、由你持有或獲授權管理的 Linux/NAS 等設備，用於 SSH、遠端桌面、設備維護和內部服務存取。
+- **核心功能**：FRPS 設定、容器客戶端接入、TCP/UDP 連接埠映射、設備狀態和日誌。Agent 內建倉庫中定制的 FRP v0.71.1 核心。
+- **部署方式**：服務端與客戶端各自從 `sgccr.ccs.tencentyun.com/frp-all-in-one` 拉取鏡像，無需複製原始碼、安裝編譯環境或經 VPS 下載客戶端二進位檔。
+- **可選能力**：管理面板網域與 HTTPS，預設在進階設定中折疊；HTTP/HTTPS 網站穿透需要額外設定及合規準備，不屬於基礎 TCP/UDP 引導流程。
+- **支援邊界**：服務端以 Linux 主機網路部署為主。Windows/macOS 客戶端依賴容器虛擬機，需自行確認鏡像支援的平台、主機服務位址和 host 網路設定，不保證與 Linux 等價。
+- **不提供**：自動備案、規避備案或接入限制、未授權存取、跨境代理服務或對外經營性穿透平台。不得用本項目繞過法規或雲服務商規則。
 
-## 核心優勢
+## 境內網站、備案與 HTTPS
 
-- **全流程容器化（免拉取源碼編譯）**：服務端與客戶端全面採用容器鏡像部署，無需在宿主機安裝任何 Node.js、Go、Python 編譯環境，告別繁重的本地構建。
-- **騰訊雲公開鏡像極速分發**：所有組件統一收攏至騰訊雲公開容器鏡像倉庫（TCR），國內外網路均可享受極速秒拉，徹底告別 DockerHub 限流與 GitHub 網路超時。
-- **客戶端單鏡像自閉環**：客戶端統一拉取 `frp-agent:latest` 容器，不區分芯片型號與硬體架構（x86/ARM 通用自適應），內置定制裁剪版 FRP v0.71.1 穿透引擎，免去外部解壓配置。
-- **生產級安全防護**：
-  - 首登超級管理員白名單防護（防止公網搶佔）
-  - FRPS 默認強隨機密鑰（防止 7000 端口未授權穿透）
-  - 後端嚴格綁定本地回環，具備安全反代感知限流（防止全局誤封）
-  - 自動申請 Let's Encrypt TLS 證書並後台無縫續期
-- **毫秒級事件驅動監控**：WebSocket 實時流式推送客戶端 CPU、內存、實時網路出入速率及流量統計，配置變更內存級熱重載生效。
+**不是「使用 HTTPS 才需要備案」。** 是否需要 ICP 備案或許可取決於業務性質、部署位置及適用規定，而非 HTTP/HTTPS 協定本身。在境內提供網際網路資訊服務應依法辦理相應手續；使用 IP、8080 等非標準連接埠不構成當然豁免。普通 TCP/UDP 設備連線也不能一概認定為無需合規手續。
 
----
+境內伺服器透過網域提供網站服務時，通常應先透過伺服器接入商完成 ICP 備案；有其他行業資質或許可要求的，按相應規定辦理。HTTPS 憑證只是加密與身分驗證憑據，**不能替代備案**。本項目不自動核驗備案狀態。
 
-<a id="architecture"></a>
+- [工信部《非經營性網際網路資訊服務備案管理辦法》](https://www.miit.gov.cn/gyhxxhb/jgsj/cyzcyfgs/bmgz/xxtxl/art/2024/art_84a0cfa0ebd049bbbe751dca9a008e56.html)
+- [工信部備案系統](https://beian.miit.gov.cn/)
+- [騰訊雲：是否需要備案](https://cloud.tencent.com/document/product/243/19630)
 
-## 架構說明
+預設 `http://伺服器IP:8080` 僅用於初始設定或受限存取，**不建議長期公開明文管理**。請先以安全群組限制來源；長期遠端管理應使用合規設定的 HTTPS 或受保護的存取通道。面板 HTTPS 不代表所有穿透服務自動擁有 HTTPS，後端服務的認證與加密仍需單獨設定。
 
-```mermaid
-flowchart TB
-    subgraph TCR["騰訊雲公開鏡像倉庫 (TCR)"]
-        FRPS_IMG["frps:latest<br/>定制裁剪 v0.71.1 核心"]
-        BACKEND_IMG["frp-backend:latest<br/>FastAPI + SQLite"]
-        FRONTEND_IMG["frp-frontend:latest<br/>React + Nginx"]
-        AGENT_IMG["frp-agent:latest<br/>內置穿透引擎統一鏡像"]
-    end
+## 服務端部署
 
-    subgraph Server["服務端 VPS (Docker / Podman Compose)"]
-        Web["Web 介面<br/>:8080 / :443"]
-        Backend["管理後端<br/>127.0.0.1:8000"]
-        FRPS["FRPS 核心<br/>:7000 穿透 + 127.0.0.1:7500 API"]
-        Web <--> Backend
-        Backend <-->|"API 熱重載"| FRPS
-    end
+準備一台有公網位址的境內 Linux 伺服器，優先沿用既有容器環境。腳本偵測 Docker/Podman；目前後端容器控制透過 Podman 介面，建議優先使用既有 Podman 環境，Docker 場景需額外核實管理介面相容性。
 
-    subgraph Clients["客戶端設備 (NAS / 雲主機 / PC / 路由器)"]
-        DockerClient["容器化 Agent<br/>frp-agent:latest<br/>內置穿透引擎 + 指標監控"]
-    end
+1. 在 [GitHub Developer Settings](https://github.com/settings/developers) 建立 OAuth App：
+   - Homepage URL：`http://伺服器IP:8080`
+   - Callback URL：`http://伺服器IP:8080/api/auth/github/callback`
+   - 記錄 Client ID，產生 Client Secret。
+2. 執行：
 
-    FRPS_IMG -.->|"一鍵拉取"| FRPS
-    BACKEND_IMG -.->|"一鍵拉取"| Backend
-    FRONTEND_IMG -.->|"一键拉取"| Web
-    AGENT_IMG -.->|"高速拉取"| DockerClient
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
+   ```
 
-    DockerClient <-.->|"WebSocket 指標/日誌"| Backend
-    DockerClient <-->|"FRP 數據隧道"| FRPS
-```
+3. 按提示填寫 OAuth 設定及**管理員 GitHub 數字 ID**。數字 ID 可在 `https://api.github.com/users/你的使用者名稱` 的 `id` 欄位查詢；也相容使用者名稱。不要略過初始管理員限制，不要公開 Client Secret 或設備權杖。
+4. 開啟面板完成 FRPS 初始化。在「設備管理 → 新增設備」取得目標系統的容器安裝腳本；在目標設備執行後設定連接埠映射。
 
----
+服務端預設目錄為 `/opt/frp-all-in-one`；從既有 Compose 目錄執行時可能沿用該目錄，以最終輸出為準。客戶端預設目錄為 Linux `/opt/frp`、macOS `~/.frp-all-in-one`、Windows `C:\frp`。
 
-<a id="quick-start-server"></a>
+**網路前提**：瀏覽器與伺服器需能存取 GitHub OAuth，腳本下載需能存取 GitHub Raw，容器引擎需能連接鏡像倉庫。境內部署不代表這些外部服務始終可達；本項目不提供公共鏡像代理或可用性保證。
 
-## 服務端部署指南
+### 連接埠與安全群組
 
-> **提示**：無需使用 `git clone` 拷貝項目源碼！服務端僅需通過標準容器編排拉取公開鏡像即可啟動。
+| 連接埠 | 用途 | 建議 |
+| --- | --- | --- |
+| TCP 8080 | 初始 HTTP 面板與 Agent 管理連線 | 僅允許可信管理端與客戶端來源 |
+| TCP 7000 | FRP 主連線 | 儘量限制為客戶端來源 |
+| 自訂 TCP/UDP 連接埠 | 業務映射 | 按需開放，業務自身須認證 |
+| TCP 80 / 443 | 可選網站驗證 / HTTPS | 完成適用合規要求後按需開放 |
+| TCP 7500 | FRPS 本地管理介面 | 不對公網開放 |
 
-### 1. 準備 GitHub OAuth App
+啟用面板網域或 HTTPS 後，同步更新 OAuth App 的 Homepage/Callback URL，並更新客戶端管理連線。憑證簽發要求 DNS 正確、80 連接埠驗證可達，以及伺服器能存取簽發服務。
 
-本系統使用 GitHub OAuth 進行管理員認證，請先創建屬於你的 OAuth App：
+## 一鍵移除
 
-1. 打開 [GitHub Developer Settings](https://github.com/settings/developers)
-2. 點擊 **New OAuth App** 填寫：
-   - **Application name**：`FRP Manager`（或自定義名稱）
-   - **Homepage URL**：`http://<你的服務器IP>:8080`（或你的域名）
-   - **Authorization callback URL**：`http://<你的服務器IP>:8080/api/auth/github/callback`
-3. 創建後記錄 **Client ID**，並生成 **Client Secret**。
+使用**部署時相同的使用者、權限和容器上下文**。腳本要求輸入 `REMOVE` 確認；非互動執行可顯式加 `--yes`（Windows 為 `-Force`）。預設只移除本項目容器，保留資料，不移除 Docker/Podman、鏡像，不全域清理或終止其他 FRP 程序。
 
----
-
-### 2. 一鍵極速部署（推薦）
-
-直接在服務器執行自動化部署腳本（自動識別系統、就緒 Docker/Podman 並從騰訊雲鏡像源秒級拉取啟動）：
+### 服務端
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
+# 移除服務，保留資料庫、憑證與設定
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | sudo bash -s -- server
+
+# 徹底清理本項目資料與 OAuth 憑據，不可恢復
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | sudo bash -s -- server --purge
 ```
 
-腳本將引導填寫 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET` 以及**初始管理員 GitHub 用戶名**（開啟防搶佔防護）。
+非預設部署目錄請加 `--dir /實際部署目錄`；自訂 Compose 項目名時加 `--project 項目名`。腳本只刪除能確認歸屬的三個服務容器、項目卷與已知資料檔，保留目錄內無關檔案。其他機器上的客戶端不會隨伺服器一起移除。
 
----
+### 客戶端
 
-### 3. 或者通過標準 Docker Compose 部署
-
-若習慣手動管理 Compose 配置：
+Linux（使用 rootful 容器部署時）：
 
 ```bash
-mkdir -p frp-manager && cd frp-manager
-
-# 下載標準化 compose 編排文件
-curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
-
-# 創建環境變量配置文件
-cat > .env <<EOF
-GITHUB_CLIENT_ID=你的ClientID
-GITHUB_CLIENT_SECRET=你的ClientSecret
-SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
-INITIAL_ADMIN_GITHUB_USERNAME=你的GitHub用戶名
-EOF
-
-# 一鍵拉取並啟動服務
-docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | sudo bash -s -- client
 ```
 
-啟動完成後，打開瀏覽器訪問 `http://<服務器IP>:8080` 即可開始使用。
-
-> **客戶端接入說明**：登錄 Web 控制台後，在「設備管理」頁面點擊「添加新設備」，系統會自動生成對應的容器一鍵啟動命令，複製並在客戶端機器執行即可完成接入。
-
----
-
-<a id="ports"></a>
-
-## 端口放行建議
-
-請確保雲服務器防火牆 / 安全組放行以下必要端口：
-
-| 端口 | 協議 | 用途說明 |
-| :--- | :--- | :--- |
-| **8080** | TCP | Web 管理控制台（默認訪問端口） |
-| **80** | TCP | HTTP 自動跳轉及 Let's Encrypt 證書申請驗證（啟用 HTTPS 時必選） |
-| **443** | TCP | Web 控制台 HTTPS 訪問（啟用 HTTPS 後可選） |
-| **7000** | TCP | FRP 穿透隧道主連接端口 |
-| **自定義區間** | TCP/UDP | 你映射出的遠程服務端口（如 6001、8081 等） |
-
----
-
-<a id="maintainer"></a>
-
-## 開源維護者發版說明
-
-本項目為開源維護者提供了一鍵全自動流水線，只需執行一行命令，即可完成定制版核心編譯、前端打包，並全量推送到騰訊雲公開鏡像倉庫：
+macOS（在 Docker Desktop/Podman 所屬帳號下執行，不加 sudo）：
 
 ```bash
-# 構建並全量推送到騰訊雲 TCR (frps, frp-backend, frp-frontend, frp-agent)
-bash deploy/build-and-push.sh [版本Tag，默認 latest]
+curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | bash -s -- client
 ```
 
-發布前，請在騰訊雲控制台將 `frps`、`frp-backend`、`frp-frontend`、`frp-agent` 四個鏡像倉庫分別設為**公開**。首次推送新倉庫時不要假設預設公開；推送成功不代表可以匿名拉取。
+Windows PowerShell（在容器環境所屬帳號下執行）：
 
-- Actions 的 `TCR_USERNAME`、`TCR_PASSWORD` 僅供維護者推送，最終使用者無需登入鏡像倉庫。
-- 鏡像工作流程會在獨立 runner 上使用空憑證設定匿名拉取四個鏡像，版本發布同時驗證版本標籤和 `latest`。驗證失敗時工作流程報錯，不會自動修改騰訊雲倉庫權限。
-- 修正可見性後，可在 Actions 中重跑失敗的匿名驗證任務，無需移動既有版本標籤。
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall-client.ps1')))
+```
 
-維護者也可在已安裝 Docker 的機器上執行匿名驗收（不會改動既有登入設定）：
+額外刪除客戶端設定和日誌：Bash 命令末尾加 `--purge`，PowerShell 加 `-Purge`。自訂目錄分別使用 `--dir /路徑`、`-InstallDir 'D:\frp'`。Linux rootless 部署不加 sudo；指定引擎使用 `--runtime podman` / `--runtime docker`，Windows 為 `-Runtime podman` / `-Runtime docker`。
+
+**移除後回控制台註銷設備與隧道。控制台「註銷設備」只刪除管理記錄，不代替你移除遠端容器。** 舊版原生二進位服務不在目前容器移除腳本的清理範圍；舊 `uninstall-frpc.sh` 位址僅作為目前容器移除命令的相容入口。
+
+## 維護者發布
+
+四個鏡像倉庫 `frps`、`frp-backend`、`frp-frontend`、`frp-agent` 必須在騰訊雲控制台分別設為**公開**。Actions 的 `TCR_USERNAME` / `TCR_PASSWORD` 僅供維護者推送，使用者無需登入倉庫。
 
 ```bash
-bash deploy/check-public-images.sh \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
+bash deploy/build-and-push.sh latest
 ```
 
----
-
-<a id="troubleshooting"></a>
-
-## 常見排障
-
-1. **GitHub 登錄後提示 `initial_admin_mismatch`？**
-   - 說明你在 `.env` 中指定了 `INITIAL_ADMIN_GITHUB_USERNAME`，但當前登錄的賬號與預設不符，系統自動攔截了越權激活。
-2. **端口映射成功但外網無法訪問？**
-   - 檢查雲服務器控制台的安全組規則，確認對應的遠程端口是否已開放 TCP/UDP 流量。
-3. **域名 HTTPS 證書申請失敗？**
-   - 確認域名 A 記錄已完全解析到服務器公网 IP，且安全組的 **80 端口** 已對外開放（用於 Let's Encrypt 挑戰驗證）。
-
----
-
-<a id="license"></a>
+CI 按變更構建鏡像，再於獨立 runner 使用空憑證匿名拉取四個鏡像。版本發布同時驗證版本標籤與 `latest`；失敗時工作流程報錯，但不會自動修改騰訊雲權限。修正可見性後重跑失敗任務即可，請勿移動已發布標籤。可用 `bash deploy/check-public-images.sh 完整鏡像位址:標籤` 單獨驗收。
 
 ## 開源協議
 
-本項目採用 [Apache-2.0](LICENSE) 協議開源。定制版核心遵循 [FRP 原版開源許可](https://github.com/fatedier/frp/blob/dev/LICENSE)。
+[Apache-2.0](LICENSE)。倉庫中的定制 FRP 核心保留其[原版許可](core/frp_custom/LICENSE)。
