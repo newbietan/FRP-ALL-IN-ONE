@@ -4,6 +4,12 @@
 
 set -eu
 
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
 # 智能确定部署工作目录：若当前目录或子目录有 compose.yml 则就地部署，否则统一使用标准持久化目录 /opt/frp-all-in-one
 if [ -f "$PWD/compose.yml" ]; then
     SCRIPT_DIR="$PWD"
