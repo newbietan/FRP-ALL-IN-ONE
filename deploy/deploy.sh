@@ -15,12 +15,53 @@ COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
 COMPOSE_MODE=""
 CONTAINER_CLI="podman"
 LOW_MEM_NO_SWAP="0"
+PUBLIC_IP=""
 PROJECT_CONTAINERS="frp-manager-backend frp-manager-web frps"
 
 echo "========================================================"
 echo "  FRP-ALL-IN-ONE - 一键部署 (腾讯云镜像服务)"
 echo "========================================================"
 echo ""
+
+read_input() {
+    local prompt="$1"
+    local var_name="$2"
+    printf "%b" "$prompt"
+    # shellcheck disable=SC2229
+    if [ -r /dev/tty ]; then
+        read -r "$var_name" < /dev/tty || true
+    else
+        read -r "$var_name" || true
+    fi
+}
+
+detect_public_ip() {
+    if [ -n "${PUBLIC_IP:-}" ] && [ "$PUBLIC_IP" != "<你的服务器IP>" ]; then
+        return
+    fi
+    echo ""
+    echo "[CHECK] 检测服务器公网 IP..."
+
+    PUBLIC_IP=$(curl -4 -s --max-time 3 ifconfig.me 2>/dev/null || \
+                curl -4 -s --max-time 3 ip.sb 2>/dev/null || \
+                curl -4 -s --max-time 3 api.ipify.org 2>/dev/null || \
+                curl -4 -s --max-time 3 icanhazip.com 2>/dev/null || \
+                echo "")
+    if [ -z "$PUBLIC_IP" ]; then
+        PUBLIC_IP=$(curl -6 -s --max-time 3 ifconfig.me 2>/dev/null || \
+                    curl -6 -s --max-time 3 ip.sb 2>/dev/null || \
+                    echo "")
+        if [ -n "$PUBLIC_IP" ]; then
+            PUBLIC_IP="[${PUBLIC_IP}]"
+        fi
+    fi
+    if [ -z "$PUBLIC_IP" ]; then
+        PUBLIC_IP="<你的服务器IP>"
+        echo -e "${YELLOW}[WARN] 未能自动获取公网 IP，请手动替换提示中的 <你的服务器IP>${NC}"
+    else
+        echo -e "${GREEN}[OK] 已自动识别服务器公网 IP: ${PUBLIC_IP}${NC}"
+    fi
+}
 
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
@@ -265,9 +306,8 @@ check_memory() {
 
         choice="${AUTO_CREATE_SWAP:-}"
         if [ -z "$choice" ]; then
-            if [ -t 0 ]; then
-                printf "是否创建 512MB Swap？(y/N): "
-                read -r choice
+            if [ -r /dev/tty ]; then
+                read_input "是否创建 512MB Swap？(y/N): " choice
             else
                 choice="n"
                 echo -e "${YELLOW}[WARN] 当前为非交互环境，默认跳过 Swap 创建（可设置 AUTO_CREATE_SWAP=y 自动创建）${NC}"
@@ -405,27 +445,13 @@ show_info() {
     echo "=========================================="
     echo ""
 
-    # 优先获取 IPv4，其次 IPv6
-    PUBLIC_IP=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || \
-                curl -4 -s --max-time 5 ip.sb 2>/dev/null || \
-                curl -4 -s --max-time 5 api.ipify.org 2>/dev/null || \
-                echo "")
-    if [ -z "$PUBLIC_IP" ]; then
-        PUBLIC_IP=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || \
-                    curl -6 -s --max-time 5 ip.sb 2>/dev/null || \
-                    echo "")
-        if [ -n "$PUBLIC_IP" ]; then
-            # IPv6 地址需要用方括号包裹
-            PUBLIC_IP="[${PUBLIC_IP}]"
-        fi
-    fi
-    if [ -z "$PUBLIC_IP" ]; then
-        PUBLIC_IP="<你的服务器IP>"
+    if [ -z "${PUBLIC_IP:-}" ] || [ "$PUBLIC_IP" = "<你的服务器IP>" ]; then
+        detect_public_ip
     fi
 
     echo "[访问地址]"
     echo "   Web 管理界面: http://${PUBLIC_IP}:8080"
-    echo "   FRP 服务端口: ${PUBLIC_IP}:7000"
+    echo "   FRP 穿透端口: ${PUBLIC_IP}:7000"
     echo ""
     echo "[登录方式]"
     echo "   使用 GitHub 账号登录"
@@ -462,7 +488,6 @@ configure_env_vars() {
     echo "=========================================="
     echo "  环境变量配置"
     echo "=========================================="
-    echo ""
 
     # 从系统级持久化文件读取（服务器重启/重新部署后仍有效）
     SYSTEM_ENV="/etc/frp-all-in-one.env"
@@ -476,16 +501,20 @@ configure_env_vars() {
         . "$ENV_FILE" 2>/dev/null || true
     fi
 
+    # 自动识别公网 IP 并完整展示给用户
+    detect_public_ip
+
     # ---- GITHUB_CLIENT_ID ----
     if [ -z "${GITHUB_CLIENT_ID:-}" ]; then
+        echo ""
         echo -e "${YELLOW}本系统使用 GitHub OAuth 登录。${NC}"
-        echo "请先创建 GitHub OAuth App: https://github.com/settings/developers"
-        echo "  - Homepage URL:            http://<你的服务器IP>:8080"
-        echo "  - Authorization callback:  http://<你的服务器IP>:8080/api/auth/github/callback"
+        echo "请先在 GitHub 创建 OAuth App: https://github.com/settings/developers"
+        echo -e "  - Homepage URL:            ${GREEN}http://${PUBLIC_IP}:8080${NC}"
+        echo -e "  - Authorization callback:  ${GREEN}http://${PUBLIC_IP}:8080/api/auth/github/callback${NC}"
         echo ""
         while true; do
-            printf "请输入 GITHUB_CLIENT_ID: "
-            read -r GITHUB_CLIENT_ID
+            read_input "请输入 GITHUB_CLIENT_ID: " GITHUB_CLIENT_ID
+            GITHUB_CLIENT_ID=$(echo "${GITHUB_CLIENT_ID:-}" | tr -d ' \r\n')
             if [ -n "$GITHUB_CLIENT_ID" ]; then
                 break
             fi
@@ -498,8 +527,8 @@ configure_env_vars() {
     # ---- GITHUB_CLIENT_SECRET ----
     if [ -z "${GITHUB_CLIENT_SECRET:-}" ]; then
         while true; do
-            printf "请输入 GITHUB_CLIENT_SECRET: "
-            read -r GITHUB_CLIENT_SECRET
+            read_input "请输入 GITHUB_CLIENT_SECRET: " GITHUB_CLIENT_SECRET
+            GITHUB_CLIENT_SECRET=$(echo "${GITHUB_CLIENT_SECRET:-}" | tr -d ' \r\n')
             if [ -n "$GITHUB_CLIENT_SECRET" ]; then
                 break
             fi
@@ -514,10 +543,8 @@ configure_env_vars() {
         echo ""
         echo -e "${YELLOW}[安全加固] 初始管理员限制（防公网抢注）：${NC}"
         echo "  建议指定你的 GitHub 用户名。指定后，只有该账号能激活为唯一超级管理员。"
-        if [ -t 0 ]; then
-            printf "请输入管理员 GitHub 用户名（建议填写，直接回车跳过）: "
-            read -r INITIAL_ADMIN_GITHUB_USERNAME
-        fi
+        read_input "请输入管理员 GitHub 用户名（建议填写，直接回车跳过）: " INITIAL_ADMIN_GITHUB_USERNAME
+        INITIAL_ADMIN_GITHUB_USERNAME=$(echo "${INITIAL_ADMIN_GITHUB_USERNAME:-}" | tr -d ' \r\n')
         if [ -n "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
             _save_to_system_env "INITIAL_ADMIN_GITHUB_USERNAME" "$INITIAL_ADMIN_GITHUB_USERNAME"
         fi
