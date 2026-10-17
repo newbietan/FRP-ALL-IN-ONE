@@ -187,7 +187,23 @@ For open-source maintainers, build and publish all 4 container images to the pub
 
 ```bash
 # Build and push frps, frp-backend, frp-frontend, and frp-agent to TCR
-sh deploy/build-and-push.sh [VERSION_TAG, default: latest]
+bash deploy/build-and-push.sh [VERSION_TAG, default: latest]
+```
+
+Before publishing, set each TCR repository (`frps`, `frp-backend`, `frp-frontend`, `frp-agent`) to **public** in the Tencent Cloud console. Do not assume repositories created on first push are public: a successful push does not prove anonymous access.
+
+- Actions secrets `TCR_USERNAME` and `TCR_PASSWORD` are only for maintainer pushes; end users do not need registry credentials.
+- The image workflow uses separate runners and empty Docker credentials to pull all four images anonymously. Versioned releases check both the version tag and `latest`. Failure fails the workflow; it does not change TCR visibility settings automatically.
+- After correcting visibility, rerun the failed verification jobs in Actions rather than moving an existing release tag.
+
+Maintainers can also verify anonymous pulls on a machine with Docker installed, without changing existing login settings:
+
+```bash
+bash deploy/check-public-images.sh \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 ```
 
 ---

@@ -187,7 +187,23 @@ docker compose up -d
 
 ```bash
 # 構建並全量推送到騰訊雲 TCR (frps, frp-backend, frp-frontend, frp-agent)
-sh deploy/build-and-push.sh [版本Tag，默認 latest]
+bash deploy/build-and-push.sh [版本Tag，默認 latest]
+```
+
+發布前，請在騰訊雲控制台將 `frps`、`frp-backend`、`frp-frontend`、`frp-agent` 四個鏡像倉庫分別設為**公開**。首次推送新倉庫時不要假設預設公開；推送成功不代表可以匿名拉取。
+
+- Actions 的 `TCR_USERNAME`、`TCR_PASSWORD` 僅供維護者推送，最終使用者無需登入鏡像倉庫。
+- 鏡像工作流程會在獨立 runner 上使用空憑證設定匿名拉取四個鏡像，版本發布同時驗證版本標籤和 `latest`。驗證失敗時工作流程報錯，不會自動修改騰訊雲倉庫權限。
+- 修正可見性後，可在 Actions 中重跑失敗的匿名驗證任務，無需移動既有版本標籤。
+
+維護者也可在已安裝 Docker 的機器上執行匿名驗收（不會改動既有登入設定）：
+
+```bash
+bash deploy/check-public-images.sh \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 ```
 
 ---

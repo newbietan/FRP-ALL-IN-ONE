@@ -331,8 +331,8 @@ async def enable_port(
 @router.get("/agent/install-script/{platform}")
 async def get_agent_install_script(
     platform: str,
+    request: Request,
     client_id: str | None = None,
-    request: Request | None = None,
     db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):

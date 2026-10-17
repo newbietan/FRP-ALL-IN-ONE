@@ -15,6 +15,8 @@
 # 所需 GitHub Secrets:
 #   TCR_USERNAME  — 腾讯云 TCR 访问凭证用户名
 #   TCR_PASSWORD  — 腾讯云 TCR 访问凭证密码
+# 发布前须在腾讯云控制台将四个镜像仓库设为公开；推送凭据不控制仓库可见性。
+# 发布后使用隔离的空凭据配置匿名拉取，防止私有镜像被误判为可用。
 # ============================================================
 
 name: Build and Push Docker Images
@@ -36,8 +38,12 @@ on:
       - 'agent/**'
       - 'core/**'
       - 'deploy/**'
+      - '.github/workflows/build-and-push.yml'
     tags:
       - 'v*'
+
+permissions:
+  contents: read
 
 env:
   REGISTRY: sgccr.ccs.tencentyun.com
@@ -70,8 +76,8 @@ jobs:
         id: changes
         run: |
           # workflow_dispatch / tag 推送：全量构建所有 4 个镜像
-          event="${{ github.event_name }}"
-          ref_type="${{ github.ref_type }}"
+          event="$GITHUB_EVENT_NAME"
+          ref_type="$GITHUB_REF_TYPE"
           if [ "$event" = "workflow_dispatch" ] || [ "$ref_type" = "tag" ]; then
             echo "backend=true" >> $GITHUB_OUTPUT
             echo "frontend=true" >> $GITHUB_OUTPUT
@@ -108,15 +114,21 @@ jobs:
 
       - name: Determine tag
         id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="${INPUT_TAG:-latest}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
           else
             TAG="latest"
           fi
-          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+          if [[ ! "$TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Invalid container image tag"
+            exit 1
+          fi
+          echo "TAG=${TAG}" >> "$GITHUB_OUTPUT"
           echo ">> Image tag: ${TAG}"
 
   # ===========================
@@ -254,3 +266,43 @@ jobs:
             ${{ env.AGENT_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # 单独的 runner 不执行登录，避免推送权限掩盖仓库私有问题。
+  verify-public-images:
+    name: Verify Public Image (${{ matrix.image }})
+    needs:
+      - detect-changes
+      - build-frps
+      - build-backend
+      - build-frontend
+      - build-agent
+    if: >-
+      ${{ always() && !cancelled() &&
+          needs.detect-changes.result == 'success' &&
+          !contains(needs.*.result, 'failure') &&
+          !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [frps, frp-backend, frp-frontend, frp-agent]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Pull images without registry credentials
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          IMAGE_TAG: ${{ needs.detect-changes.outputs.tag }}
+        run: |
+          image="$REGISTRY/$NAMESPACE/$IMAGE_NAME"
+          images=("$image:$IMAGE_TAG")
+          if [ "$IMAGE_TAG" != "latest" ]; then
+            images+=("$image:latest")
+          fi
+          bash deploy/check-public-images.sh "${images[@]}"
+          {
+            printf '### Anonymous pull verified\n'
+            printf -- '- %s\n' "${images[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"

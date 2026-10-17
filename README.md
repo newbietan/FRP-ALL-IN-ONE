@@ -187,7 +187,23 @@ docker compose up -d
 
 ```bash
 # 构建并全量推送到腾讯云 TCR (frps, frp-backend, frp-frontend, frp-agent)
-sh deploy/build-and-push.sh [版本Tag，默认 latest]
+bash deploy/build-and-push.sh [版本Tag，默认 latest]
+```
+
+发布前，请在腾讯云控制台将 `frps`、`frp-backend`、`frp-frontend`、`frp-agent` 四个镜像仓库分别设为**公开**。首次推送新仓库时不要假设默认公开；镜像推送成功不代表可以匿名拉取。
+
+- GitHub Actions 的 `TCR_USERNAME`、`TCR_PASSWORD` 仅供维护者推送使用，最终用户无需登录镜像仓库。
+- 镜像发布工作流会在独立 runner 上使用空凭据配置匿名拉取四个镜像，版本发布同时验证版本标签和 `latest`。验证失败时工作流报错，不会自动修改腾讯云仓库权限。
+- 仅需重新检查可见性时，可在 Actions 中手动重跑失败的匿名验证任务，无需移动已有版本标签。
+
+维护者也可以在已安装 Docker 的机器上执行匿名验收（不会改动已有登录配置）：
+
+```bash
+bash deploy/check-public-images.sh \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 ```
 
 ---
