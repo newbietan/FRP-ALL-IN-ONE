@@ -12,6 +12,5 @@ __pycache__/
 pyrightconfig.json
 data/
 server/bin/
-core/frp_custom/assets/
 
 

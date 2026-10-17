@@ -2,7 +2,7 @@
 # FRP-ALL-IN-ONE 客户端 Agent 容器镜像 (内置定制 FRP v0.71.1 穿透内核)
 # 镜像发布至腾讯云 TCR: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 # ==============================================================================
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /build
 
