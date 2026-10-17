@@ -225,11 +225,18 @@ async def github_callback(
     if not admin:
         admin_count = crud.count_admins(db)
         if admin_count == 0:
-            # 检查是否有预设初始管理员用户名限制（防止公网抢注）
-            expected_admin = os.environ.get("INITIAL_ADMIN_GITHUB_USERNAME", "").strip().lower()
-            if expected_admin and github_username.lower() != expected_admin:
-                print(f"[Security] 拦截非预设初始管理员登录: {github_username} (允许的管理员: {expected_admin})")
-                return RedirectResponse(url=f"{frontend_base}/?error=initial_admin_mismatch")
+            # 检查是否有预设初始管理员限制（支持 GitHub 用户名 或 纯数字 GitHub ID，防止公网抢注）
+            expected_admin = (
+                os.environ.get("INITIAL_ADMIN_GITHUB_ID", "")
+                or os.environ.get("INITIAL_ADMIN_GITHUB_USERNAME", "")
+            ).strip().lower()
+
+            if expected_admin:
+                is_match = (str(github_id) == expected_admin) or (github_username.lower() == expected_admin)
+                if not is_match:
+                    print(f"[Security] 拦截非预设初始管理员登录: login={github_username}, id={github_id} (期望: {expected_admin})")
+                    return RedirectResponse(url=f"{frontend_base}/?error=initial_admin_mismatch")
+
             # 首个用户自动成为唯一管理员
             admin = crud.create_admin_from_github(
                 db, github_id, github_username, avatar_url, is_superadmin=True

@@ -4,13 +4,17 @@
 
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# 智能确定部署工作目录：若当前目录或子目录有 compose.yml 则就地部署，否则统一使用标准持久化目录 /opt/frp-all-in-one
+if [ -f "$PWD/compose.yml" ]; then
+    SCRIPT_DIR="$PWD"
+elif [ -f "$PWD/deploy/compose.yml" ]; then
+    SCRIPT_DIR="$PWD/deploy"
+else
+    SCRIPT_DIR="/opt/frp-all-in-one"
+    mkdir -p "$SCRIPT_DIR"
+fi
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
+cd "$SCRIPT_DIR"
 COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
 COMPOSE_MODE=""
 CONTAINER_CLI="podman"
@@ -366,14 +370,61 @@ cleanup_existing_project_containers() {
     fi
 }
 
+ensure_compose_file() {
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        echo "[CONFIG] 自动生成标准容器编排配置文件 compose.yml..."
+        cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
+services:
+  backend:
+    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest
+    container_name: frp-manager-backend
+    restart: always
+    user: root
+    network_mode: host
+    env_file: .env
+    environment:
+      - PODMAN_BIN=podman
+      - PODMAN_TIMEOUT=30
+      - PODMAN_URL=unix:///run/podman/podman.sock
+    volumes:
+      - frp-data:/opt/frp
+      - frp-certs:/app/certs
+      - nginx-conf:/etc/nginx/conf.d
+      - ./data:/app/data
+      - ./frps.toml:/app/frps.toml
+      - /run/podman/podman.sock:/run/podman/podman.sock
+
+  frontend:
+    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest
+    container_name: frp-manager-web
+    restart: always
+    network_mode: host
+    volumes:
+      - frp-certs:/etc/nginx/certs:ro
+      - nginx-conf:/etc/nginx/conf.d
+
+  frps:
+    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest
+    container_name: frps
+    restart: always
+    network_mode: host
+    volumes:
+      - ./frps.toml:/etc/frp/frps.toml
+
+volumes:
+  frp-data:
+  frp-certs:
+  nginx-conf:
+COMPOSE_EOF
+        echo -e "${GREEN}[OK] compose.yml 已就绪${NC}"
+    fi
+}
+
 deploy_services() {
     echo ""
-    echo "[DEPLOY] 构建并启动服务..."
+    echo "[DEPLOY] 部署并启动服务..."
 
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        echo -e "${RED}[ERROR] compose.yml 不存在，请在 deploy 目录运行${NC}"
-        exit 1
-    fi
+    ensure_compose_file
 
     if [ "$LOW_MEM_NO_SWAP" = "1" ]; then
         echo -e "${YELLOW}[WARN] 检测到低内存且未创建 Swap，继续构建很可能 OOM 失败${NC}"
@@ -458,6 +509,7 @@ show_info() {
     echo -e "   ${YELLOW}* 首个登录的用户将自动成为管理员${NC}"
     echo ""
     echo "[常用命令]"
+    echo "   部署工作目录: cd $SCRIPT_DIR"
     case "$COMPOSE_MODE" in
         "docker-compose-plugin")
             echo "   查看日志: docker compose -f compose.yml logs -f"
@@ -538,15 +590,27 @@ configure_env_vars() {
         _save_to_system_env "GITHUB_CLIENT_SECRET" "$GITHUB_CLIENT_SECRET"
     fi
 
-    # ---- INITIAL_ADMIN_GITHUB_USERNAME (防首登抢占) ----
-    if [ -z "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
+    # ---- INITIAL_ADMIN (防首登抢占) ----
+    if [ -z "${INITIAL_ADMIN_GITHUB_ID:-}" ] && [ -z "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
         echo ""
-        echo -e "${YELLOW}[安全加固] 初始管理员限制（防公网抢注）：${NC}"
-        echo "  建议指定你的 GitHub 用户名。指定后，只有该账号能激活为唯一超级管理员。"
-        read_input "请输入管理员 GitHub 用户名（建议填写，直接回车跳过）: " INITIAL_ADMIN_GITHUB_USERNAME
-        INITIAL_ADMIN_GITHUB_USERNAME=$(echo "${INITIAL_ADMIN_GITHUB_USERNAME:-}" | tr -d ' \r\n')
-        if [ -n "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
-            _save_to_system_env "INITIAL_ADMIN_GITHUB_USERNAME" "$INITIAL_ADMIN_GITHUB_USERNAME"
+        echo -e "${YELLOW}[安全加固] 初始超级管理员限制（防公网抢注）：${NC}"
+        echo "  强烈建议指定管理员的 GitHub 账号，仅该账号首次登录可激活为唯一超级管理员。"
+        echo -e "  ${BLUE}[获取指引]${NC}"
+        echo "   - GitHub 数字ID (推荐，永久不变): 浏览器打开 https://api.github.com/users/你的用户名 查看到 id"
+        echo "   - GitHub 用户名: 登录 GitHub 后右上角头像处显示的用户名 (如 newbietan)"
+        echo ""
+        read_input "请输入管理员 GitHub 数字ID 或 用户名（建议填写，直接回车跳过）: " INITIAL_ADMIN_INPUT
+        INITIAL_ADMIN_INPUT=$(echo "${INITIAL_ADMIN_INPUT:-}" | tr -d ' \r\n')
+        if [ -n "$INITIAL_ADMIN_INPUT" ]; then
+            if echo "$INITIAL_ADMIN_INPUT" | grep -Eq '^[0-9]+$'; then
+                INITIAL_ADMIN_GITHUB_ID="$INITIAL_ADMIN_INPUT"
+                _save_to_system_env "INITIAL_ADMIN_GITHUB_ID" "$INITIAL_ADMIN_GITHUB_ID"
+                echo -e "${GREEN}[OK] 已记录管理员 GitHub ID: ${INITIAL_ADMIN_GITHUB_ID}${NC}"
+            else
+                INITIAL_ADMIN_GITHUB_USERNAME="$INITIAL_ADMIN_INPUT"
+                _save_to_system_env "INITIAL_ADMIN_GITHUB_USERNAME" "$INITIAL_ADMIN_GITHUB_USERNAME"
+                echo -e "${GREEN}[OK] 已记录管理员 GitHub 用户名: ${INITIAL_ADMIN_GITHUB_USERNAME}${NC}"
+            fi
         fi
     fi
 
@@ -564,6 +628,7 @@ configure_env_vars() {
 GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
 GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
 SECRET_KEY=${SECRET_KEY}
+INITIAL_ADMIN_GITHUB_ID=${INITIAL_ADMIN_GITHUB_ID:-}
 INITIAL_ADMIN_GITHUB_USERNAME=${INITIAL_ADMIN_GITHUB_USERNAME:-}
 ENVEOF
     chmod 600 "$ENV_FILE"
@@ -572,6 +637,7 @@ ENVEOF
     export GITHUB_CLIENT_ID
     export GITHUB_CLIENT_SECRET
     export SECRET_KEY
+    export INITIAL_ADMIN_GITHUB_ID
     export INITIAL_ADMIN_GITHUB_USERNAME
 
     echo ""
