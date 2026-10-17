@@ -1,38 +1,59 @@
-import subprocess
-import secrets
-from typing import Dict
+from __future__ import annotations
+
+import asyncio
+import contextlib
 import ipaddress
+import logging
 import os
 import re
-import asyncio
+import secrets
+from typing import Any
+
 import httpx
-from core.container_engine import run_podman
+from core.container_engine import restart_frps_service
 
-# FRP 配置文件路径（映射到宿主机项目根目录）
-# Backend 容器中 /app/frps.toml 映射到宿主机 ./frps.toml
-# FRPS 容器会读取同一个文件
-FRPS_CONFIG_PATH = "/app/frps.toml"
+logger = logging.getLogger(__name__)
 
-# 默认 FRP 版本（备用，当无法获取最新版本时使用）
-DEFAULT_FRP_VERSION = "0.61.1"
+def get_frps_config_path() -> str:
+    """获取当前环境下的 FRPS 配置文件路径（优先系统路径，兼容容器与工作区）"""
+    env_path = os.environ.get("FRPS_CONFIG_PATH")
+    if env_path:
+        return env_path
+    candidates = [
+        "/etc/frp/frps.toml",
+        "/app/frps.toml",
+        "./deploy/frps.toml",
+        "./frps.toml",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    if os.path.isdir("/etc/frp"):
+        return "/etc/frp/frps.toml"
+    return "./deploy/frps.toml"
+
+# 默认 FRP 版本（最新稳定版 v0.71.1）
+DEFAULT_FRP_VERSION = "0.71.1"
+
 
 async def get_latest_frp_version() -> str:
     """从 GitHub API 获取 FRP 最新发布版本号"""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
-                'https://api.github.com/repos/fatedier/frp/releases/latest',
-                headers={'Accept': 'application/vnd.github.v3+json'}
+                "https://api.github.com/repos/fatedier/frp/releases/latest",
+                headers={"Accept": "application/vnd.github.v3+json"}
             )
             if response.status_code == 200:
-                tag_name = response.json().get('tag_name', '')
+                tag_name: str = response.json().get("tag_name", "")
                 # tag_name 格式为 "v0.61.1"，去掉 "v" 前缀
-                if tag_name.startswith('v'):
+                if tag_name.startswith("v"):
                     return tag_name[1:]
                 return tag_name
     except Exception as e:
         print(f"获取 FRP 最新版本失败: {e}")
     return DEFAULT_FRP_VERSION
+
 
 def _is_public_ip(ip_str: str) -> bool:
     try:
@@ -49,7 +70,8 @@ def _is_public_ip(ip_str: str) -> bool:
         or ip.is_reserved
     )
 
-def _extract_ip(text: str):
+
+def _extract_ip(text: str | None) -> str | None:
     if not text:
         return None
     m4 = re.search(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\b", text)
@@ -60,7 +82,8 @@ def _extract_ip(text: str):
         return m6.group(0)
     return None
 
-async def get_public_ip_details() -> Dict:
+
+async def get_public_ip_details() -> dict[str, Any]:
     urls_env = os.environ.get("PUBLIC_IP_URLS", "").strip()
     if urls_env:
         urls = [u.strip() for u in urls_env.split(",") if u.strip()]
@@ -82,7 +105,7 @@ async def get_public_ip_details() -> Dict:
         "Accept": "application/json,text/plain,*/*",
     }
 
-    errors = []
+    errors: list[str] = []
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=6.0, write=6.0, pool=6.0)) as client:
         for url in urls:
             try:
@@ -118,11 +141,42 @@ async def get_public_ip_details() -> Dict:
 
     return {"success": False, "ip": "未知", "ip_version": None, "source": None, "errors": errors}
 
+
 async def get_public_ip() -> str:
     result = await get_public_ip_details()
-    return result.get("ip") or "未知"
+    return str(result.get("ip") or "未知")
 
-async def generate_frps_config(port: int = 7000, auth_token: str = None, server_ip: str = None, disabled_ports: list = None) -> Dict:
+
+async def reload_frps_via_api(passwords: list[str]) -> bool:
+    """尝试通过 FRPS Admin API 进行热重载（无需重启容器，避免隧道断连）"""
+    possible_urls = [
+        "http://127.0.0.1:7500",
+        "http://localhost:7500",
+        "http://host.containers.internal:7500",
+        "http://frps:7500",
+    ]
+    for pwd in passwords:
+        if not pwd:
+            continue
+        for base in possible_urls:
+            try:
+                async with httpx.AsyncClient(timeout=3.0, auth=httpx.BasicAuth("admin", pwd)) as client:
+                    resp = await client.get(f"{base}/api/reload")
+                    if resp.status_code == 200:
+                        return True
+            except Exception as e:
+                logger.debug("尝试 FRPS 热重载端点 %s 失败: %s", base, e)
+                continue
+    return False
+
+
+async def generate_frps_config(
+    port: int = 7000,
+    auth_token: str | None = None,
+    server_ip: str | None = None,
+    disabled_ports: list[int] | None = None,
+    current_dashboard_pwd: str | None = None,
+) -> dict[str, Any]:
     """
     生成 FRPS 配置文件
 
@@ -148,11 +202,11 @@ async def generate_frps_config(port: int = 7000, auth_token: str = None, server_
         total_start = 1
         total_end = 65535
 
-        allowed_ranges = []
+        allowed_ranges: list[str] = []
         current_start = total_start
 
         # 排序并去重
-        sorted_disabled = sorted(list(set([int(p) for p in disabled_ports if total_start <= int(p) <= total_end])))
+        sorted_disabled = sorted({int(p) for p in disabled_ports if total_start <= int(p) <= total_end})
 
         for p in sorted_disabled:
             if p > current_start:
@@ -170,20 +224,18 @@ async def generate_frps_config(port: int = 7000, auth_token: str = None, server_
 
         # 如果排除了所有端口（极端情况），allowed_ranges 为空，这将导致 allowPorts = []，即拒绝所有
         if allowed_ranges:
-            allow_ports_config = f'allowPorts = [{", ".join([f"{r}" for r in allowed_ranges])}]'
+            items_str = ", ".join(f'"{r}"' for r in allowed_ranges)
+            allow_ports_config = f"allowPorts = [{items_str}]"
         else:
-            allow_ports_config = 'allowPorts = []' # 禁用所有端口
-    else:
-        # 没有任何禁用端口，不生成 allowPorts 配置，默认允许所有
-        pass
+            allow_ports_config = "allowPorts = []"  # 禁用所有端口
 
     try:
-        # 生成配置内容（包含 Dashboard API 配置）
+        # 生成配置内容（包含 Dashboard API 配置，仅监听本地回环地址，严禁公网暴露）
         config_content = f"""bindPort = {port}
 auth.token = "{auth_token}"
 
-# Dashboard API (用于管理后台获取客户端状态)
-webServer.addr = "0.0.0.0"
+# Dashboard API (用于管理后台获取客户端状态，仅限本机访问)
+webServer.addr = "127.0.0.1"
 webServer.port = 7500
 webServer.user = "admin"
 webServer.password = "{dashboard_pwd}"
@@ -192,40 +244,43 @@ webServer.password = "{dashboard_pwd}"
 {allow_ports_config}
 
 # 由 FRP Manager 自动生成
-# 修改后需要重启 FRPS 容器: podman restart frps
+# 修改后需要重载或重启 FRPS
 """
 
-        # 写入配置文件（写到项目根目录，容器会自动映射）
-        with open(FRPS_CONFIG_PATH, 'w') as f:
+        # 写入配置文件并锁定为 0600 权限（防未授权用户读取凭据）
+        config_path = get_frps_config_path()
+        with open(config_path, "w") as f:
             f.write(config_content)
+        with contextlib.suppress(OSError):
+            os.chmod(config_path, 0o600)
 
-        # 尝试重启 FRPS 容器
+        # 优先尝试通过 FRPS Admin API 热重载（无需重启，避免已有隧道断连）
         frps_restarted = False
         restart_message = ""
 
-        try:
-            # 使用 podman CLI 重启容器（同步调用，通过 asyncio.to_thread 避免阻塞事件循环）
-            result = await asyncio.to_thread(run_podman, ["restart", "frps"], 30)
-            if result.returncode == 0:
-                print("[INFO] FRPS 容器已成功重启")
-                frps_restarted = True
-                restart_message = "FRPS 已重启"
+        # 尝试使用新旧密码热重载
+        pwds_to_try = [p for p in [current_dashboard_pwd, dashboard_pwd] if p]
+        api_reloaded = await reload_frps_via_api(pwds_to_try)
 
-                # 等待容器启动完成
-                await asyncio.sleep(2)
-            else:
-                restart_message = f"FRPS 重启失败: {result.stderr.strip()}"
+        if api_reloaded:
+            print("[INFO] FRPS 配置已通过 Admin API 热重载生效（零断连）")
+            frps_restarted = True
+            restart_message = "FRPS 配置已热重载生效"
+        else:
+            try:
+                # 优先原生服务重启（systemctl），回退至容器模式
+                result = await asyncio.to_thread(restart_frps_service, 30)
+                if result.returncode == 0:
+                    print("[INFO] FRPS 服务已成功重启")
+                    frps_restarted = True
+                    restart_message = "FRPS 已重启"
+                    await asyncio.sleep(2)
+                else:
+                    restart_message = f"FRPS 重启提示: {result.stderr.strip()}"
+                    print(f"[WARN] {restart_message}")
+            except Exception as e:
+                restart_message = f"无法重启 FRPS: {e!s}"
                 print(f"[WARN] {restart_message}")
-        except FileNotFoundError:
-            restart_message = "未找到 podman 命令，请手动重启 FRPS"
-            print(f"[WARN] {restart_message}")
-        except subprocess.TimeoutExpired:
-            restart_message = "FRPS 重启超时，请手动检查"
-            print(f"[WARN] {restart_message}")
-        except Exception as e:
-            restart_message = f"无法重启 FRPS 容器: {str(e)}"
-            print(f"[WARN] {restart_message}")
-            print("提示: 配置已生成，请手动执行 'podman restart frps'")
 
         # 获取公网 IP（优先使用用户提供的）
         if server_ip and server_ip.strip():

@@ -117,6 +117,19 @@ export const defaultGlobalSettings: GlobalSettings = {
 };
 
 export function getOSScript(os: OS, ip: string, port: number, token: string, devId: string): string {
+  if (os === 'docker') {
+    return `# FRP Manager Agent - Docker 一键运行 (腾讯云 TCR 高速拉取)
+docker run -d \\
+  --name frp-agent \\
+  --network host \\
+  --restart always \\
+  -e FRP_AGENT_TOKEN="${token}" \\
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest \\
+  -server "ws://${ip}:8080/ws/agent/${devId}" \\
+  -id "${devId}"
+`;
+  }
+
   if (os === 'windows') {
     return `# Powershell FRP Client deployment script
 # Generated for Windows. Make sure to run in Administrator Powershell.

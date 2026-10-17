@@ -1,0 +1,171 @@
+// Copyright 2023 The frp Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package v1
+
+import (
+	"reflect"
+
+	"github.com/fatedier/frp/pkg/util/jsonx"
+	"github.com/fatedier/frp/pkg/util/util"
+)
+
+type VisitorTransport struct {
+	UseEncryption  bool `json:"useEncryption,omitempty"`
+	UseCompression bool `json:"useCompression,omitempty"`
+}
+
+type VisitorBaseConfig struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Enabled controls whether this visitor is enabled. nil or true means enabled, false means disabled.
+	// This allows individual control over each visitor, complementing the global "start" field.
+	Enabled   *bool            `json:"enabled,omitempty"`
+	Transport VisitorTransport `json:"transport,omitempty"`
+	SecretKey string           `json:"secretKey,omitempty"`
+	// if the server user is not set, it defaults to the current user
+	ServerUser string `json:"serverUser,omitempty"`
+	ServerName string `json:"serverName,omitempty"`
+	BindAddr   string `json:"bindAddr,omitempty"`
+	// BindPort is the port that visitor listens on.
+	// It can be less than 0, it means don't bind to the port and only receive connections redirected from
+	// other visitors. (This is not supported for SUDP now)
+	BindPort int `json:"bindPort,omitempty"`
+
+	// Plugin specifies what plugin should be used.
+	Plugin TypedVisitorPluginOptions `json:"plugin,omitempty"`
+}
+
+func (c VisitorBaseConfig) Clone() VisitorBaseConfig {
+	out := c
+	out.Enabled = util.ClonePtr(c.Enabled)
+	out.Plugin = c.Plugin.Clone()
+	return out
+}
+
+func (c *VisitorBaseConfig) GetBaseConfig() *VisitorBaseConfig {
+	return c
+}
+
+func (c *VisitorBaseConfig) Complete() {
+	if c.BindAddr == "" {
+		c.BindAddr = "127.0.0.1"
+	}
+}
+
+type VisitorConfigurer interface {
+	Complete()
+	GetBaseConfig() *VisitorBaseConfig
+	Clone() VisitorConfigurer
+}
+
+type VisitorType string
+
+const (
+	VisitorTypeSTCP VisitorType = "stcp"
+	VisitorTypeXTCP VisitorType = "xtcp"
+	VisitorTypeSUDP VisitorType = "sudp"
+)
+
+var visitorConfigTypeMap = map[VisitorType]reflect.Type{
+	VisitorTypeSTCP: reflect.TypeFor[STCPVisitorConfig](),
+	VisitorTypeXTCP: reflect.TypeFor[XTCPVisitorConfig](),
+	VisitorTypeSUDP: reflect.TypeFor[SUDPVisitorConfig](),
+}
+
+type TypedVisitorConfig struct {
+	Type string `json:"type"`
+	VisitorConfigurer
+}
+
+func (c *TypedVisitorConfig) UnmarshalJSON(b []byte) error {
+	configurer, err := DecodeVisitorConfigurerJSON(b, DecodeOptions{})
+	if err != nil {
+		return err
+	}
+
+	c.Type = configurer.GetBaseConfig().Type
+	c.VisitorConfigurer = configurer
+	return nil
+}
+
+func (c *TypedVisitorConfig) MarshalJSON() ([]byte, error) {
+	return jsonx.Marshal(c.VisitorConfigurer)
+}
+
+func NewVisitorConfigurerByType(t VisitorType) VisitorConfigurer {
+	v, ok := visitorConfigTypeMap[t]
+	if !ok {
+		return nil
+	}
+	vc := reflect.New(v).Interface().(VisitorConfigurer)
+	vc.GetBaseConfig().Type = string(t)
+	return vc
+}
+
+var _ VisitorConfigurer = &STCPVisitorConfig{}
+
+type STCPVisitorConfig struct {
+	VisitorBaseConfig
+}
+
+func (c *STCPVisitorConfig) Clone() VisitorConfigurer {
+	out := *c
+	out.VisitorBaseConfig = c.VisitorBaseConfig.Clone()
+	return &out
+}
+
+var _ VisitorConfigurer = &SUDPVisitorConfig{}
+
+type SUDPVisitorConfig struct {
+	VisitorBaseConfig
+}
+
+func (c *SUDPVisitorConfig) Clone() VisitorConfigurer {
+	out := *c
+	out.VisitorBaseConfig = c.VisitorBaseConfig.Clone()
+	return &out
+}
+
+var _ VisitorConfigurer = &XTCPVisitorConfig{}
+
+type XTCPVisitorConfig struct {
+	VisitorBaseConfig
+
+	Protocol          string `json:"protocol,omitempty"`
+	KeepTunnelOpen    bool   `json:"keepTunnelOpen,omitempty"`
+	MaxRetriesAnHour  int    `json:"maxRetriesAnHour,omitempty"`
+	MinRetryInterval  int    `json:"minRetryInterval,omitempty"`
+	FallbackTo        string `json:"fallbackTo,omitempty"`
+	FallbackTimeoutMs int    `json:"fallbackTimeoutMs,omitempty"`
+
+	// NatTraversal configuration for NAT traversal
+	NatTraversal *NatTraversalConfig `json:"natTraversal,omitempty"`
+}
+
+func (c *XTCPVisitorConfig) Complete() {
+	c.VisitorBaseConfig.Complete()
+
+	c.Protocol = util.EmptyOr(c.Protocol, "quic")
+	c.MaxRetriesAnHour = util.EmptyOr(c.MaxRetriesAnHour, 8)
+	c.MinRetryInterval = util.EmptyOr(c.MinRetryInterval, 90)
+	c.FallbackTimeoutMs = util.EmptyOr(c.FallbackTimeoutMs, 1000)
+}
+
+func (c *XTCPVisitorConfig) Clone() VisitorConfigurer {
+	out := *c
+	out.VisitorBaseConfig = c.VisitorBaseConfig.Clone()
+	out.NatTraversal = c.NatTraversal.Clone()
+	return &out
+}

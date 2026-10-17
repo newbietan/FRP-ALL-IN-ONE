@@ -48,7 +48,9 @@ async function request<T = any>(
     try {
       const d = await res.json();
       detail = d.detail || d.message || '';
-    } catch {}
+    } catch (_err) {
+      void _err;
+    }
     const err = new Error(detail || `HTTP ${res.status}`);
     (err as any).status = res.status;
     throw err;
@@ -65,7 +67,7 @@ async function request<T = any>(
 export const authApi = {
   /** 重定向到 GitHub OAuth */
   loginWithGitHub() {
-    window.location.href = `${API_BASE}/api/auth/github`;
+    window.location.assign('/api/auth/github');
   },
 
   /** 获取当前用户信息 */
@@ -76,7 +78,7 @@ export const authApi = {
   /** 换绑 GitHub 账号 */
   rebindGithub() {
     const token = getToken();
-    window.location.href = `${API_BASE}/api/auth/github/rebind?token=${token}`;
+    window.location.assign(`/api/auth/github/rebind?token=${encodeURIComponent(token || '')}`);
   },
 };
 
@@ -215,11 +217,6 @@ export const frpApi = {
   getInstallScript(platform: string, clientId?: string) {
     const params = clientId ? `?client_id=${clientId}` : '';
     return request<string>('GET', `/api/frp/agent/install-script/${platform}${params}`);
-  },
-
-  /** 获取 Agent 平台列表 */
-  getPlatforms() {
-    return request('GET', '/api/frp/agent/platforms');
   },
 };
 

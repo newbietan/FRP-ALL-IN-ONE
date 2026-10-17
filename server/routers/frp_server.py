@@ -2,18 +2,24 @@
 FRP 服务端管理路由
 包含 FRPS 部署、端口管理、Agent 安装脚本生成等
 """
+from __future__ import annotations
+
+import contextlib
+import logging
 import subprocess
 import time
-import httpx
+
+from core import get_current_user, get_db
+from core.container_engine import run_podman
+import crud
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse
+import frp_deploy
+import httpx
+import models
 from sqlalchemy.orm import Session
 
-import crud
-import frp_deploy
-import models
-from core import get_db, get_current_user
-from core.container_engine import run_podman
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/frp", tags=["FRP 服务端管理"])
 
@@ -21,7 +27,7 @@ router = APIRouter(prefix="/frp", tags=["FRP 服务端管理"])
 @router.get("/server-status")
 async def get_frps_status(
     db: Session = Depends(get_db),
-    current_user: models.Admin = Depends(get_current_user)
+    current_user: models.Admin | None = Depends(get_current_user)
 ):
     """
     从 FRPS Dashboard API 获取实时状态
@@ -48,7 +54,6 @@ async def get_frps_status(
     ]
 
     base_url = None
-    auth = ("admin", dashboard_pwd)
     server_info = {}
 
     async with httpx.AsyncClient(timeout=5, auth=httpx.BasicAuth("admin", dashboard_pwd)) as client:
@@ -59,7 +64,8 @@ async def get_frps_status(
                     base_url = url
                     server_info = resp.json()
                     break
-            except:
+            except Exception as e:
+                logger.debug("探测 FRPS Dashboard %s 失败: %s", url, e)
                 continue
 
         if not base_url:
@@ -100,10 +106,8 @@ async def get_frps_status(
                 s = str(value).strip()
                 if not s:
                     return default
-                try:
+                with contextlib.suppress(Exception):
                     return int(float(s))
-                except Exception:
-                    pass
                 m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*([KMGTP]?B)\s*$", s, re.IGNORECASE)
                 if not m:
                     return default
@@ -140,26 +144,20 @@ async def get_frps_status(
             # 获取各类代理列表
             tcp_proxies, udp_proxies, http_proxies = [], [], []
 
-            try:
+            with contextlib.suppress(Exception):
                 resp = await client.get(f"{base_url}/proxy/tcp")
                 if resp.status_code == 200:
                     tcp_proxies = resp.json().get("proxies", []) or []
-            except:
-                pass
 
-            try:
+            with contextlib.suppress(Exception):
                 resp = await client.get(f"{base_url}/proxy/udp")
                 if resp.status_code == 200:
                     udp_proxies = resp.json().get("proxies", []) or []
-            except:
-                pass
 
-            try:
+            with contextlib.suppress(Exception):
                 resp = await client.get(f"{base_url}/proxy/http")
                 if resp.status_code == 200:
                     http_proxies = resp.json().get("proxies", []) or []
-            except:
-                pass
 
             all_proxies_raw = tcp_proxies + udp_proxies + http_proxies
             all_proxies = [_normalize_proxy(p) for p in all_proxies_raw]
@@ -198,8 +196,7 @@ async def get_frps_status(
             }
 
         except Exception as e:
-            import logging
-            logging.exception("获取 FRPS 状态失败")
+            logger.exception("获取 FRPS 状态失败: %s", e)
             return {
                 "success": False,
                 "message": "获取 FRPS 状态失败，请检查服务端日志",
@@ -211,15 +208,16 @@ async def get_frps_status(
 @router.post("/deploy-server")
 async def deploy_frp_server(
     port: int = 7000,
-    auth_token: str = None,
-    server_ip: str = None,
+    auth_token: str | None = None,
+    server_ip: str | None = None,
     db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
     """生成 FRPS 配置文件"""
     if not (1 <= port <= 65535):
         raise HTTPException(status_code=400, detail="端口必须在 1-65535 之间")
-    result = await frp_deploy.generate_frps_config(port, auth_token, server_ip)
+    current_pwd = crud.get_config(db, models.ConfigKeys.FRPS_DASHBOARD_PWD)
+    result = await frp_deploy.generate_frps_config(port, auth_token, server_ip, current_dashboard_pwd=current_pwd)
 
     if result["success"]:
         info = result["info"]
@@ -235,9 +233,13 @@ async def deploy_frp_server(
 
 @router.post("/restart-frps")
 async def restart_frps(
+    db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
-    """手动重启 FRPS 容器"""
+    """手动重启或热重载 FRPS"""
+    dashboard_pwd = crud.get_config(db, models.ConfigKeys.FRPS_DASHBOARD_PWD) or ""
+    if dashboard_pwd and await frp_deploy.reload_frps_via_api([dashboard_pwd]):
+        return {"success": True, "message": "FRPS 已通过 API 成功热重载（零断连）"}
     try:
         import asyncio
         result = await asyncio.to_thread(run_podman, ["restart", "frps"], 30)
@@ -286,10 +288,11 @@ async def disable_port(
         frps_port = int(crud.get_config(db, models.ConfigKeys.FRPS_PORT) or 7000)
         auth_token = crud.get_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN)
         server_ip = crud.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP)
+        current_pwd = crud.get_config(db, models.ConfigKeys.FRPS_DASHBOARD_PWD)
 
-        await frp_deploy.generate_frps_config(frps_port, auth_token, server_ip, current_ports)
+        await frp_deploy.generate_frps_config(frps_port, auth_token, server_ip, current_ports, current_dashboard_pwd=current_pwd)
 
-        return {"success": True, "message": f"端口 {port} 已禁用，FRPS 已重启"}
+        return {"success": True, "message": f"端口 {port} 已禁用，FRPS 已生效"}
 
     return {"success": True, "message": f"端口 {port} 已经是禁用状态"}
 
@@ -311,76 +314,25 @@ async def enable_port(
         frps_port = int(crud.get_config(db, models.ConfigKeys.FRPS_PORT) or 7000)
         auth_token = crud.get_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN)
         server_ip = crud.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP)
+        current_pwd = crud.get_config(db, models.ConfigKeys.FRPS_DASHBOARD_PWD)
 
-        await frp_deploy.generate_frps_config(frps_port, auth_token, server_ip, current_ports)
+        await frp_deploy.generate_frps_config(frps_port, auth_token, server_ip, current_ports, current_dashboard_pwd=current_pwd)
 
-        return {"success": True, "message": f"端口 {port} 已启用，FRPS 已重启"}
+        return {"success": True, "message": f"端口 {port} 已启用，FRPS 已生效"}
 
     return {"success": True, "message": f"端口 {port} 未被禁用"}
 
 
 # ===========================
-# Agent 分发 API
+# 客户端 Agent 容器化部署命令与一键脚本
 # ===========================
-
-@router.get("/agent/download/{platform}")
-async def download_agent_binary(
-    platform: str,
-    current_user: models.Admin = Depends(get_current_user)
-):
-    """
-    下载 Agent 二进制文件 (重定向到 GitHub Releases)
-    platform: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64
-    """
-    valid_platforms = [
-        "linux-amd64", "linux-arm64",
-        "darwin-amd64", "darwin-arm64",
-        "windows-amd64"
-    ]
-
-    if platform not in valid_platforms:
-        raise HTTPException(status_code=400, detail=f"Invalid platform. Valid: {valid_platforms}")
-
-    if platform.startswith("windows"):
-        filename = f"frp-agent-{platform}.exe"
-    else:
-        filename = f"frp-agent-{platform}"
-
-    github_url = f"https://github.com/GreenhandTan/FRP-ALL-IN-ONE/releases/latest/download/{filename}"
-    return RedirectResponse(url=github_url)
-
-
-@router.get("/agent/platforms")
-async def get_available_agent_platforms():
-    """获取可用的 Agent 平台列表"""
-    platform_info = {
-        "linux-amd64": {"name": "Linux x64", "os": "linux", "arch": "amd64", "ext": ""},
-        "linux-arm64": {"name": "Linux ARM64", "os": "linux", "arch": "arm64", "ext": ""},
-        "darwin-amd64": {"name": "macOS Intel", "os": "darwin", "arch": "amd64", "ext": ""},
-        "darwin-arm64": {"name": "macOS Apple Silicon", "os": "darwin", "arch": "arm64", "ext": ""},
-        "windows-amd64": {"name": "Windows x64", "os": "windows", "arch": "amd64", "ext": ".exe"},
-    }
-
-    platforms = []
-    for platform_id, info in platform_info.items():
-        filename = f"frp-agent-{platform_id}{info['ext']}"
-        platforms.append({
-            "id": platform_id,
-            "name": info["name"],
-            "os": info["os"],
-            "arch": info["arch"],
-            "available": True,
-            "filename": filename
-        })
-
-    return {"platforms": platforms}
 
 
 @router.get("/agent/install-script/{platform}")
 async def get_agent_install_script(
     platform: str,
-    client_id: str = None,
-    request: Request = None,
+    client_id: str | None = None,
+    request: Request | None = None,
     db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
@@ -393,7 +345,6 @@ async def get_agent_install_script(
     auth_token = crud_module.get_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN) or "frp-token"
     server_ip = crud_module.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
     frps_port = crud_module.get_config(db, models.ConfigKeys.FRPS_PORT) or "7000"
-    frps_version = crud_module.get_config(db, models.ConfigKeys.FRPS_VERSION) or "0.61.1"
     panel_access_port = (crud_module.get_config(db, models.ConfigKeys.PANEL_ACCESS_PORT) or "").strip()
 
     # 优先级：① 已配置的面板访问端口（NAT 场景显式指定） → ② 请求 Host 头中携带的端口（浏览器经 NAT 访问时）
@@ -432,23 +383,38 @@ async def get_agent_install_script(
 
     client_id = client.id
     client_token = client.auth_token
-    download_base = "https://github.com/GreenhandTan/FRP-ALL-IN-ONE/releases/latest/download"
 
-    if platform == "windows":
-        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, frps_version, download_base, ws_scheme, manager_host)
+    if platform == "docker":
+        image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
+        manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
+        cmd = (
+            f"# FRP Manager Agent - Docker 一键运行 (腾讯云 TCR 极速拉取)\n"
+            f"docker run -d \\\n"
+            f"  --name frp-agent \\\n"
+            f"  --network host \\\n"
+            f"  --restart always \\\n"
+            f"  -e FRP_AGENT_TOKEN=\"{client_token}\" \\\n"
+            f"  {image} \\\n"
+            f"  -server \"{manager_ws_url}\" \\\n"
+            f"  -id \"{client_id}\"\n"
+        )
+        return PlainTextResponse(content=cmd, media_type="text/plain")
+    elif platform == "windows":
+        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host)
         return PlainTextResponse(content=script, media_type="text/plain")
     else:
         os_type = "darwin" if platform == "darwin" else "linux"
-        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, frps_version, download_base, os_type, ws_scheme, manager_host)
+        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host)
         return PlainTextResponse(content=script, media_type="text/plain")
 
 
-def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, frp_version, download_base, ws_scheme="ws", manager_host=None):
-    """生成 Windows PowerShell 安装脚本"""
+def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None):
+    """生成 Windows PowerShell 容器一键部署脚本"""
     if manager_host is None:
         manager_host = server_ip
     manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
-    return f'''# FRP Manager Agent + FRPC 一键安装脚本 (Windows)
+    image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
+    return f'''# FRP Manager Agent - 容器一键部署脚本 (Windows PowerShell)
 $ErrorActionPreference = "Stop"
 
 $SERVER_IP = "{server_ip}"
@@ -456,72 +422,78 @@ $FRPS_PORT = "{frps_port}"
 $FRPS_TOKEN = "{auth_token}"
 $CLIENT_TOKEN = "{client_token}"
 $CLIENT_ID = "{client_id}"
-$FRP_VERSION = "{frp_version}"
-$INSTALL_DIR = "C:\\frp"
-$DOWNLOAD_BASE = "{download_base}"
+$IMAGE = "{image}"
 $MANAGER_WS_URL = "{manager_ws_url}"
+$INSTALL_DIR = "C:\\frp"
 
-Write-Host "===============================================" -ForegroundColor Cyan
-Write-Host "  FRP Manager Agent 一键安装 (Windows)" -ForegroundColor Cyan
-Write-Host "===============================================" -ForegroundColor Cyan
+Write-Host "======================================================" -ForegroundColor Cyan
+Write-Host "  FRP Manager Agent 容器一键部署 (Windows)" -ForegroundColor Cyan
+Write-Host "  镜像: $IMAGE (腾讯云 TCR 高速拉取)" -ForegroundColor Cyan
+Write-Host "======================================================" -ForegroundColor Cyan
 
+# 1. 检测容器环境
+$CONTAINER_CLI = ""
+if (Get-Command docker -ErrorAction SilentlyContinue) {{
+    $CONTAINER_CLI = "docker"
+}} elseif (Get-Command podman -ErrorAction SilentlyContinue) {{
+    $CONTAINER_CLI = "podman"
+}}
+
+if ($CONTAINER_CLI -eq "") {{
+    Write-Host "[WARN] 未检测到 Docker 或 Podman 环境。" -ForegroundColor Yellow
+    Write-Host "请先安装 Docker Desktop: https://www.docker.com/products/docker-desktop/" -ForegroundColor Cyan
+    Write-Host "安装完成并启动后，再次执行此脚本即可自动运行客户端。" -ForegroundColor Green
+    Exit 1
+}}
+
+Write-Host "[OK] 检测到容器环境: $CONTAINER_CLI" -ForegroundColor Green
+
+# 2. 创建本地配置目录与基础配置
 if (!(Test-Path $INSTALL_DIR)) {{ New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null }}
 if (!(Test-Path "$INSTALL_DIR\\logs")) {{ New-Item -ItemType Directory -Path "$INSTALL_DIR\\logs" -Force | Out-Null }}
 
-# 下载 FRPC
-$frpUrl = "https://github.com/fatedier/frp/releases/download/v$FRP_VERSION/frp_${{FRP_VERSION}}_windows_amd64.zip"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri $frpUrl -OutFile "$INSTALL_DIR\\frp.zip" -UseBasicParsing
-Expand-Archive -Path "$INSTALL_DIR\\frp.zip" -DestinationPath $INSTALL_DIR -Force
-Copy-Item "$INSTALL_DIR\\frp_${{FRP_VERSION}}_windows_amd64\\frpc.exe" "$INSTALL_DIR\\frpc.exe" -Force
-Remove-Item "$INSTALL_DIR\\frp.zip" -Force
-Remove-Item "$INSTALL_DIR\\frp_${{FRP_VERSION}}_windows_amd64" -Recurse -Force
-
-# 下载 Agent
-try {{
-    $agentUrl = "$DOWNLOAD_BASE/frp-agent-windows-amd64.exe"
-    Invoke-WebRequest -Uri $agentUrl -OutFile "$INSTALL_DIR\\frp-agent.exe" -UseBasicParsing -TimeoutSec 60
-}} catch {{
-    Write-Host "[WARN] Agent 下载失败，跳过" -ForegroundColor Yellow
-}}
-
-# 创建配置文件
 $config = @"
 serverAddr = "$SERVER_IP"
 serverPort = $FRPS_PORT
 auth.token = "$FRPS_TOKEN"
-webServer.addr = "127.0.0.1"
-webServer.port = 7400
 "@
 $config | Out-File -FilePath "$INSTALL_DIR\\frpc.toml" -Encoding UTF8
 
-# 添加到开机启动
-$startupFolder = [Environment]::GetFolderPath('Startup')
-$startScript = "@echo off`ncd /d \"$INSTALL_DIR\"`nstart /min \"\" \"$INSTALL_DIR\\frpc.exe\" -c \"$INSTALL_DIR\\frpc.toml\""
-$startScript | Out-File -FilePath "$INSTALL_DIR\\start-frpc.bat" -Encoding ASCII
-Copy-Item "$INSTALL_DIR\\start-frpc.bat" "$startupFolder\\start-frpc.bat" -Force
+# 3. 清理旧容器并启动新容器
+& $CONTAINER_CLI rm -f frp-agent 2>$null | Out-Null
 
-# 启动 FRPC
-Start-Process -FilePath "$INSTALL_DIR\\frpc.exe" -ArgumentList "-c", "$INSTALL_DIR\\frpc.toml" -WindowStyle Minimized
+Write-Host "正在从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..." -ForegroundColor Yellow
+& $CONTAINER_CLI pull $IMAGE
 
-if (Test-Path "$INSTALL_DIR\\frp-agent.exe") {{
-    $agentScript = "@echo off`ncd /d \"$INSTALL_DIR\"`nstart /min \"\" \"$INSTALL_DIR\\frp-agent.exe\" -server $MANAGER_WS_URL -id $CLIENT_ID -token $CLIENT_TOKEN -frpc \"$INSTALL_DIR\\frpc.exe\" -config \"$INSTALL_DIR\\frpc.toml\" -log \"$INSTALL_DIR\\logs\""
-    $agentScript | Out-File -FilePath "$INSTALL_DIR\\start-frp-agent.bat" -Encoding ASCII
-    Copy-Item "$INSTALL_DIR\\start-frp-agent.bat" "$startupFolder\\start-frp-agent.bat" -Force
-    Start-Process -FilePath "$INSTALL_DIR\\frp-agent.exe" -ArgumentList "-server", "$MANAGER_WS_URL", "-id", "$CLIENT_ID", "-token", "$CLIENT_TOKEN", "-frpc", "$INSTALL_DIR\\frpc.exe", "-config", "$INSTALL_DIR\\frpc.toml", "-log", "$INSTALL_DIR\\logs" -WindowStyle Minimized
-}}
+& $CONTAINER_CLI run -d `
+  --name frp-agent `
+  --network host `
+  --restart always `
+  -v "${{INSTALL_DIR}}\\logs:/opt/frp/logs" `
+  -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
+  $IMAGE `
+  -server "$MANAGER_WS_URL" `
+  -id "$CLIENT_ID" `
+  -config /opt/frp/frpc.toml `
+  -log /opt/frp/logs
 
-Write-Host "安装完成！" -ForegroundColor Green
+Write-Host "======================================================" -ForegroundColor Green
+Write-Host "  部署成功！FRP-Agent 容器已在后台运行" -ForegroundColor Green
+Write-Host "======================================================" -ForegroundColor Green
+Write-Host "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
+Write-Host "查看日志: $CONTAINER_CLI logs -f frp-agent"
 '''
 
 
-def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, frp_version, download_base, os_type, ws_scheme="ws", manager_host=None):
-    """生成 Linux/macOS Bash 安装脚本"""
+def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None):
+    """生成 Linux/macOS 容器一键部署脚本（自动检测/就绪容器环境，统一拉取 TCR 客户端镜像）"""
     if manager_host is None:
         manager_host = server_ip
     manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
+    image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
     return f'''#!/bin/bash
-# FRP Manager Agent + FRPC 一键安装脚本 (Linux/macOS)
+# FRP Manager Agent - 容器一键部署脚本 ({os_type})
+# 架构: 自动检测/就绪 Docker 或 Podman 环境，从腾讯云公开镜像仓库拉取并启动
 
 set -e
 
@@ -530,10 +502,9 @@ FRPS_PORT="{frps_port}"
 FRPS_TOKEN="{auth_token}"
 CLIENT_TOKEN="{client_token}"
 CLIENT_ID="{client_id}"
-FRP_VERSION="{frp_version}"
-INSTALL_DIR="/opt/frp"
-DOWNLOAD_BASE="{download_base}"
+IMAGE="{image}"
 MANAGER_WS_URL="{manager_ws_url}"
+INSTALL_DIR="/opt/frp"
 
 RED='\\033[0;31m'
 GREEN='\\033[0;32m'
@@ -546,183 +517,108 @@ log_ok() {{ echo -e "${{GREEN}}[OK]${{NC}} $1"; }}
 log_warn() {{ echo -e "${{YELLOW}}[WARN]${{NC}} $1"; }}
 log_error() {{ echo -e "${{RED}}[ERROR]${{NC}} $1"; }}
 
-detect_arch() {{
-    case "$(uname -m)" in
-        x86_64|amd64) echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        *) echo "amd64" ;;
-    esac
-}}
-
-ARCH=$(detect_arch)
-OS="{os_type}"
-
 echo ""
-echo -e "${{BLUE}}===============================================${{NC}}"
-echo -e "${{BLUE}}  FRP Manager Agent 一键安装 ($OS-$ARCH)${{NC}}"
-echo -e "${{BLUE}}===============================================${{NC}}"
+echo -e "${{BLUE}}======================================================${{NC}}"
+echo -e "${{BLUE}}  FRP Manager Agent 容器一键部署 ({os_type})${{NC}}"
+echo -e "${{BLUE}}  镜像源: $IMAGE (腾讯云 TCR 高速拉取)${{NC}}"
+echo -e "${{BLUE}}======================================================${{NC}}"
 echo ""
 
-# 创建安装目录
-log_info "[1/5] 创建安装目录..."
-mkdir -p $INSTALL_DIR
-mkdir -p $INSTALL_DIR/logs
-log_ok "目录创建完成: $INSTALL_DIR"
+# 1. 检测或自动安装容器环境
+log_info "[1/4] 检测容器运行环境..."
+CONTAINER_CLI=""
 
-# 下载 FRPC
-log_info "[2/5] 下载 FRPC v$FRP_VERSION..."
-FRP_URL="https://github.com/fatedier/frp/releases/download/v${{FRP_VERSION}}/frp_${{FRP_VERSION}}_${{OS}}_${{ARCH}}.tar.gz"
-
-if command -v wget &> /dev/null; then
-    wget -q --show-progress "$FRP_URL" -O /tmp/frp.tar.gz
+if command -v docker >/dev/null 2>&1; then
+    CONTAINER_CLI="docker"
+elif command -v podman >/dev/null 2>&1; then
+    CONTAINER_CLI="podman"
 else
-    log_error "需要 wget"
+    log_warn "未检测到 Docker 或 Podman 环境，正在尝试就绪..."
+    if [ "{os_type}" = "linux" ]; then
+        if [ "$EUID" -ne 0 ]; then
+            log_error "当前非 root 用户，无法自动安装容器环境。请先安装 Docker: curl -fsSL https://get.docker.com | bash"
+            exit 1
+        fi
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            case "$ID" in
+                ubuntu|debian)
+                    apt-get update && apt-get install -y docker.io || apt-get install -y podman
+                    ;;
+                centos|rhel|fedora|rocky|almalinux)
+                    yum install -y docker || yum install -y podman
+                    ;;
+                alpine)
+                    apk update && apk add --no-cache podman
+                    ;;
+                *)
+                    curl -fsSL https://get.docker.com | bash
+                    ;;
+            esac
+        else
+            curl -fsSL https://get.docker.com | bash
+        fi
+
+        if command -v docker >/dev/null 2>&1; then
+            CONTAINER_CLI="docker"
+            systemctl enable --now docker 2>/dev/null || true
+        elif command -v podman >/dev/null 2>&1; then
+            CONTAINER_CLI="podman"
+        fi
+    elif [ "{os_type}" = "darwin" ]; then
+        log_error "macOS 请先启动 Docker Desktop 或通过 Homebrew 安装: brew install --cask docker"
+        exit 1
+    fi
+fi
+
+if [ -z "$CONTAINER_CLI" ]; then
+    log_error "容器环境就绪失败，请先安装 Docker: https://docs.docker.com/engine/install/"
     exit 1
 fi
 
-tar -xzf /tmp/frp.tar.gz -C /tmp/
-cp /tmp/frp_${{FRP_VERSION}}_${{OS}}_${{ARCH}}/frpc $INSTALL_DIR/
-chmod +x $INSTALL_DIR/frpc
-rm -rf /tmp/frp.tar.gz /tmp/frp_*
-log_ok "FRPC 下载完成"
+log_ok "使用容器引擎: $CONTAINER_CLI"
 
-# 下载 Agent
-log_info "[3/5] 下载 Agent ($OS-$ARCH)..."
-AGENT_PATH="$INSTALL_DIR/frp-agent"
-AGENT_FILENAME="frp-agent-${{OS}}-${{ARCH}}"
-GITHUB_URL="$DOWNLOAD_BASE/$AGENT_FILENAME"
+# 2. 创建本地配置目录与基础配置文件
+log_info "[2/4] 创建本地配置目录: $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR/logs"
 
-AGENT_DOWNLOAD_OK=0
-if wget -q --show-progress "$GITHUB_URL" -O "$AGENT_PATH" 2>/dev/null; then
-    chmod +x "$AGENT_PATH"
-    log_ok "Agent 下载完成"
-    AGENT_DOWNLOAD_OK=1
-else
-    log_warn "Agent 下载失败（$GITHUB_URL）"
-    log_warn "管理控制台将无法监控该设备，FRPC 仍可正常建立隧道"
-    log_warn "请确认 GitHub Releases 中已有 frp-agent-${{OS}}-${{ARCH}} 文件，或手动下载后放置到 $AGENT_PATH"
-fi
-
-# 创建配置文件
-log_info "[4/5] 创建配置文件..."
-cat > $INSTALL_DIR/frpc.toml << 'FRPC_CONFIG'
+cat > "$INSTALL_DIR/frpc.toml" << 'FRPC_CONFIG'
 serverAddr = "{server_ip}"
 serverPort = {frps_port}
 auth.token = "{auth_token}"
-webServer.addr = "127.0.0.1"
-webServer.port = 7400
 FRPC_CONFIG
-log_ok "配置文件已创建"
+chmod 600 "$INSTALL_DIR/frpc.toml"
+log_ok "本地配置文件已创建 (0600 权限)"
 
-# 创建系统服务
-log_info "[5/5] 创建系统服务..."
-if [ "$AGENT_DOWNLOAD_OK" = "1" ]; then
-    if [ "$OS" = "linux" ]; then
-        # 检测 init 系统
-        if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-            # systemd (Ubuntu/Debian/CentOS/Fedora 等)
-            cat > /etc/systemd/system/frp-agent.service << AGENT_SERVICE
-[Unit]
-Description=FRP Manager Agent
-After=network.target
+# 3. 清理已存在的旧 Agent 容器
+log_info "[3/4] 检查并清理旧容器..."
+$CONTAINER_CLI rm -f frp-agent 2>/dev/null || true
 
-[Service]
-Type=simple
-ExecStart=$INSTALL_DIR/frp-agent -server $MANAGER_WS_URL -id $CLIENT_ID -token $CLIENT_TOKEN -frpc $INSTALL_DIR/frpc -config $INSTALL_DIR/frpc.toml -log $INSTALL_DIR/logs
-Restart=always
-RestartSec=5
+# 4. 从腾讯云公开镜像仓库秒级拉取并启动
+log_info "[4/4] 从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..."
+$CONTAINER_CLI pull "$IMAGE"
 
-[Install]
-WantedBy=multi-user.target
-AGENT_SERVICE
-
-            systemctl daemon-reload
-            systemctl enable frp-agent
-            systemctl start frp-agent
-            log_ok "Agent 服务已创建并启动 (systemd)"
-        elif command -v rc-update >/dev/null 2>&1 || command -v openrc >/dev/null 2>&1; then
-            # OpenRC (Alpine 等)
-            # command 只能放可执行文件路径，参数必须放 command_args
-            # 否则 start-stop-daemon 会把 -server 等当成自己的参数
-            AGENT_BIN="$INSTALL_DIR/frp-agent"
-            AGENT_ARGS="-server $MANAGER_WS_URL -id $CLIENT_ID -token $CLIENT_TOKEN -frpc $INSTALL_DIR/frpc -config $INSTALL_DIR/frpc.toml -log $INSTALL_DIR/logs"
-            cat > /etc/init.d/frp-agent << AGENT_OPENRC
-#!/sbin/openrc-run
-
-name="frp-agent"
-description="FRP Manager Agent"
-command="$AGENT_BIN"
-command_args="$AGENT_ARGS"
-command_background=true
-pidfile="/run/\$RC_SVCNAME.pid"
-
-start_pre() {{
-    mkdir -p "$INSTALL_DIR/logs"
-}}
-
-stop() {{
-    start-stop-daemon --stop --pidfile "\$pidfile" --retry=TERM/5/KILL/2
-    rm -f "\$pidfile"
-}}
-
-depend() {{
-    need net
-    after firewall
-}}
-AGENT_OPENRC
-            chmod +x /etc/init.d/frp-agent
-            rc-update add frp-agent default 2>/dev/null || true
-            rc-service frp-agent start 2>/dev/null || /etc/init.d/frp-agent start
-            log_ok "Agent 服务已创建并启动 (OpenRC)"
-        else
-            # 无 systemd/OpenRC，使用 nohup 后台运行
-            log_warn "未检测到 systemd 或 OpenRC，使用后台进程模式"
-            nohup $INSTALL_DIR/frp-agent -server $MANAGER_WS_URL -id $CLIENT_ID -token $CLIENT_TOKEN -frpc $INSTALL_DIR/frpc -config $INSTALL_DIR/frpc.toml -log $INSTALL_DIR/logs > $INSTALL_DIR/logs/agent.log 2>&1 &
-            echo $! > $INSTALL_DIR/frp-agent.pid
-            log_ok "Agent 已后台启动 (PID: $(cat $INSTALL_DIR/frp-agent.pid))"
-        fi
-    elif [ "$OS" = "darwin" ]; then
-        PLIST_PATH="$HOME/Library/LaunchAgents/com.frpmanager.agent.plist"
-        mkdir -p "$HOME/Library/LaunchAgents"
-        cat > "$PLIST_PATH" << DARWIN_PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.frpmanager.agent</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$INSTALL_DIR/frp-agent</string>
-        <string>-server</string><string>$MANAGER_WS_URL</string>
-        <string>-id</string><string>$CLIENT_ID</string>
-        <string>-token</string><string>$CLIENT_TOKEN</string>
-        <string>-frpc</string><string>$INSTALL_DIR/frpc</string>
-        <string>-config</string><string>$INSTALL_DIR/frpc.toml</string>
-        <string>-log</string><string>$INSTALL_DIR/logs</string>
-    </array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>$INSTALL_DIR/logs/agent.log</string>
-    <key>StandardErrorPath</key><string>$INSTALL_DIR/logs/agent.err</string>
-</dict>
-</plist>
-DARWIN_PLIST
-        launchctl load "$PLIST_PATH" 2>/dev/null || true
-        launchctl start com.frpmanager.agent 2>/dev/null || true
-        log_ok "Agent 服务已创建并启动 (launchd)"
-    fi
-else
-    log_warn "跳过 Agent 服务创建（Agent 二进制未下载成功）"
-fi
+$CONTAINER_CLI run -d \\
+  --name frp-agent \\
+  --network host \\
+  --restart always \\
+  -v "$INSTALL_DIR/logs:/opt/frp/logs" \\
+  -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
+  "$IMAGE" \\
+  -server "$MANAGER_WS_URL" \\
+  -id "$CLIENT_ID" \\
+  -config /opt/frp/frpc.toml \\
+  -log /opt/frp/logs
 
 echo ""
-echo -e "${{GREEN}}===============================================${{NC}}"
-echo -e "${{GREEN}}  安装完成！${{NC}}"
-echo -e "${{GREEN}}===============================================${{NC}}"
-echo ""
-echo "安装目录: $INSTALL_DIR"
+echo -e "${{GREEN}}======================================================${{NC}}"
+echo -e "${{GREEN}}  部署成功！FRP-Agent 容器已在后台运行${{NC}}"
+echo -e "${{GREEN}}======================================================${{NC}}"
+echo "容器名称: frp-agent"
 echo "客户端 ID: $CLIENT_ID"
-echo "服务器: $SERVER_IP:$FRPS_PORT"
+echo "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
+echo "查看日志: $CONTAINER_CLI logs -f frp-agent"
 '''
 
 

@@ -2,19 +2,20 @@
 系统设置路由
 包含域名设置、HTTPS 配置等
 """
-import re
-import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from __future__ import annotations
 
-import models
-import crud
-from core import get_db, get_current_user
+import asyncio
+import re
+
+from core import get_current_user, get_db
 from core.rate_limit import limiter
-from services.dns_checker import check_dns_resolution, get_public_ip
+import crud
+from fastapi import APIRouter, Depends, HTTPException, Request
+import models
+from pydantic import BaseModel
+from services.dns_checker import check_dns_resolution
 from services.tls_manager import tls_manager
-from core.container_engine import run_podman
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/settings", tags=["系统设置"])
 
@@ -116,22 +117,10 @@ async def enable_tls(
 
     # 先生成并部署临时 HTTP Nginx 配置，以便 Let's Encrypt 可以通过 80 端口访问验证挑战
     temp_http_config = tls_manager.generate_nginx_config(domain, enable_https=False)
-    config_path = f"/app/certs/nginx-{domain}.conf"
-    with open(config_path, "w") as f:
-        f.write(temp_http_config)
-
-    try:
-        # 复制临时配置到 Nginx 容器并重载，使 Nginx 监听 80 并开始代理 9080 端口的 acme 挑战
-        run_podman(
-            ["cp", config_path, "frp-manager-web:/etc/nginx/conf.d/default.conf"],
-            timeout=30
-        )
-        tls_manager.reload_nginx()
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"部署临时 Nginx 挑战代理失败：{str(e)}"
-        }
+    deploy_temp = tls_manager.apply_nginx_config(temp_http_config, "default.conf")
+    if not deploy_temp["success"]:
+        return deploy_temp
+    tls_manager.reload_nginx()
 
     # 自动申请 Let's Encrypt 证书（使用 standalone 模式并绑定 9080 端口，前端已通过 80 代理）
     result = await asyncio.to_thread(tls_manager.issue_cert, domain)
@@ -145,34 +134,13 @@ async def enable_tls(
     nginx_key_path = key_path.replace("/app/certs", "/etc/nginx/certs")
     nginx_config = tls_manager.generate_nginx_config(domain, nginx_cert_path, nginx_key_path, enable_https=True)
 
-    # 覆写配置文件为 HTTPS 版本
-    with open(config_path, "w") as f:
-        f.write(nginx_config)
+    deploy_final = tls_manager.apply_nginx_config(nginx_config, "default.conf")
+    if not deploy_final["success"]:
+        return deploy_final
 
-    # 尝试复制到 Nginx 容器
-    try:
-        # 复制配置文件到 Nginx 容器
-        cp_result = run_podman(
-            ["cp", config_path, "frp-manager-web:/etc/nginx/conf.d/default.conf"],
-            timeout=30
-        )
-
-        if cp_result.returncode != 0:
-            return {
-                "success": False,
-                "message": f"复制 Nginx 配置失败：{cp_result.stderr}"
-            }
-
-        # 重载 Nginx
-        reload_result = tls_manager.reload_nginx()
-        if not reload_result["success"]:
-            return reload_result
-
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"更新 Nginx 配置失败：{str(e)}"
-        }
+    reload_result = tls_manager.reload_nginx()
+    if not reload_result["success"]:
+        return reload_result
 
     # 保存配置到数据库
     crud.set_config(db, models.ConfigKeys.SERVER_DOMAIN, domain)
@@ -197,21 +165,8 @@ async def disable_tls(
 
     # 生成 HTTP 配置的 Nginx 配置
     nginx_config = tls_manager.generate_nginx_config(domain or "_", "", "", enable_https=False)
-
-    config_path = "/app/certs/nginx-http.conf"
-    with open(config_path, "w") as f:
-        f.write(nginx_config)
-
-    # 复制到 Nginx 容器
-    try:
-        run_podman(
-            ["cp", config_path, "frp-manager-web:/etc/nginx/conf.d/default.conf"],
-            timeout=30
-        )
-
-        tls_manager.reload_nginx()
-    except Exception:
-        pass
+    tls_manager.apply_nginx_config(nginx_config, "default.conf")
+    tls_manager.reload_nginx()
 
     # 更新数据库
     crud.set_config(db, models.ConfigKeys.TLS_ENABLED, "false")
@@ -281,7 +236,7 @@ async def set_panel_port(
             if not (1 <= port_num <= 65535):
                 raise ValueError()
         except ValueError:
-            raise HTTPException(status_code=400, detail="端口号必须是 1-65535 之间的整数")
+            raise HTTPException(status_code=400, detail="端口号必须是 1-65535 之间的整数") from None
     crud.set_config(db, models.ConfigKeys.PANEL_ACCESS_PORT, port_str)
     return {"success": True, "port": port_str}
 

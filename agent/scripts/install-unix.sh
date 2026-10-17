@@ -159,10 +159,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment="FRP_AGENT_TOKEN=$AGENT_TOKEN"
 ExecStart=$INSTALL_DIR/$AGENT_BINARY \\
     -server "$AGENT_SERVER_URL" \\
     -id "$AGENT_CLIENT_ID" \\
-    -token "$AGENT_TOKEN" \\
     -frpc "$INSTALL_DIR/frpc" \\
     -config "$INSTALL_DIR/frpc.toml" \\
     -log "$INSTALL_DIR/logs"
@@ -192,6 +192,11 @@ create_launchd_service() {
 <dict>
     <key>Label</key>
     <string>com.frp-manager.agent</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FRP_AGENT_TOKEN</key>
+        <string>$AGENT_TOKEN</string>
+    </dict>
     <key>ProgramArguments</key>
     <array>
         <string>$INSTALL_DIR/$AGENT_BINARY</string>
@@ -199,8 +204,6 @@ create_launchd_service() {
         <string>$AGENT_SERVER_URL</string>
         <string>-id</string>
         <string>$AGENT_CLIENT_ID</string>
-        <string>-token</string>
-        <string>$AGENT_TOKEN</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

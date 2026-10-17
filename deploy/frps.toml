@@ -1,4 +1,5 @@
 bindPort = 7000
+auth.token = "init_token_placeholder"
 
-# 此文件由系统自动生成
+# 此文件由系统自动生成，部署时会自动生成强随机密钥并由 Web 控制台管理
 # 请通过 Web 界面配置 FRPS，不要手动编辑

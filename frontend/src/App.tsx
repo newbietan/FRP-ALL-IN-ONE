@@ -44,7 +44,8 @@ import {
   Download,
   ArrowUp,
   ArrowDown,
-  BookOpen,
+  BookOpen, 
+  Box,
   Code,
   Search,
   Filter
@@ -55,8 +56,8 @@ import {
   defaultGlobalSettings,
   getOSScript
 } from './data';
-import { APP_VERSION_DISPLAY, GITHUB_REPO } from './version';
-import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, isLoggedIn, setToken, clearToken, ClientData } from './api';
+import { APP_VERSION_DISPLAY } from './version';
+import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, isLoggedIn, setToken, clearToken } from './api';
 import { dashboardWs } from './ws';
 
 // Navigation transitions simulation mapping
@@ -99,7 +100,7 @@ export default function App() {
 
   // Navigation states
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.LOGIN);
-  const [lastScreen, setLastScreen] = useState<Screen | null>(null);
+  const [_lastScreen, setLastScreen] = useState<Screen | null>(null);
   const [transitionDirection, setTransitionDirection] = useState<'push' | 'push_back' | 'slide_up' | 'none'>('none');
 
   // Business state — 初始为空，由 loadDashboardData 从后端 API 加载
@@ -125,7 +126,7 @@ export default function App() {
   const [tempDomain, setTempDomain] = useState<string>('');
   const [enableAutoHttps, setEnableAutoHttps] = useState<boolean>(false);
   const [tempDashboardPort, setTempDashboardPort] = useState<string>('');
-  const [dnsChecked, setDnsChecked] = useState<boolean>(true);
+  const [_dnsChecked, setDnsChecked] = useState<boolean>(true);
   const [dnsCheckLoading, setDnsCheckLoading] = useState<boolean>(false);
   // 追踪服务端已保存的 TLS 状态，避免保存设置时重复申请证书
   const [savedTlsEnabled, setSavedTlsEnabled] = useState<boolean>(false);
@@ -283,8 +284,22 @@ export default function App() {
     }
   };
 
-  // 页面初始化：处理 OAuth 回调或已登录状态
+  // 页面初始化：处理 OAuth 回调、错误提示或已登录状态
   useEffect(() => {
+    // 处理登录错误重定向提示
+    const searchParams = new URLSearchParams(window.location.search);
+    const authError = searchParams.get('error');
+    if (authError) {
+      if (authError === 'initial_admin_mismatch') {
+        triggerToast(t('登录被拒绝：当前系统已指定特定的管理员 GitHub 账号！', 'Login rejected: Specific admin GitHub account required!'), 'warning');
+      } else if (authError === 'not_authorized') {
+        triggerToast(t('未授权访问：系统已配置管理员，该账号无访问权限', 'Unauthorized: Admin already configured, account not permitted'), 'warning');
+      } else {
+        triggerToast(t(`登录失败: ${authError}`, `Login failed: ${authError}`), 'warning');
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
     const hash = window.location.hash;
     if (hash && hash.includes('access_token=')) {
       const token = hash.split('access_token=')[1]?.split('&')[0];
@@ -494,7 +509,9 @@ export default function App() {
             }));
           }
         }
-      } catch {}
+      } catch (_err) {
+        void _err;
+      }
 
       // 加载域名设置（同时获取数据库中存储的公网 IP）
       try {
@@ -513,7 +530,9 @@ export default function App() {
         if (Object.keys(patch).length > 0) {
           setServerConfig(prev => ({ ...prev, ...patch }));
         }
-      } catch {}
+      } catch (_err) {
+        void _err;
+      }
 
       // 加载面板公网访问端口（NAT 映射场景）
       try {
@@ -523,19 +542,25 @@ export default function App() {
           ...prev,
           dashboardPort: portCfg.port ? Number(portCfg.port) : 0,
         }));
-      } catch {}
+      } catch (_err) {
+        void _err;
+      }
 
       // 加载用户信息
       try {
         const profile = await authApi.getProfile();
         setUserProfile(profile);
-      } catch {}
+      } catch (_err) {
+        void _err;
+      }
 
       // 加载系统运行信息
       try {
         const info = await systemApi.getInfo();
         setSystemInfo(info);
-      } catch {}
+      } catch (_err) {
+        void _err;
+      }
     } catch (err: any) {
       if (err.status === 401 || err.status === 403) {
         clearToken();
@@ -707,23 +732,28 @@ export default function App() {
     if (tunnel?.backendId && tunnel.deviceId) {
       try {
         await tunnelsApi.delete(tunnel.deviceId, tunnel.backendId);
-      } catch {}
+      } catch (_err) {
+        void _err;
+      }
     }
     setTunnels(prev => prev.filter(t => t.id !== id));
     triggerToast(`穿透隧道 '${name}' 已成功释放.`, 'warning');
   };
 
   // Reset demo simulator configuration
-  const handleUninstallDevice = (id: string, name: string) => {
+  const _handleUninstallDevice = (id: string, name: string) => {
     setDevices(prev => prev.map(d => d.id === id ? { ...d, status: 'offline', lastSeen: '已断开' } : d));
     setTunnels(prev => prev.map(t => t.deviceId === id ? { ...t, status: 'offline' } : t));
     triggerToast(`FRP 客户端 agent '${name}' 已安全停用并离线.`, 'warning');
   };
+  void _handleUninstallDevice;
 
   const handleDeleteDevice = async (deviceId: string, deviceName: string) => {
     try {
       await clientsApi.delete(deviceId);
-    } catch {}
+    } catch (_err) {
+      void _err;
+    }
     setDevices(prev => prev.filter(d => d.id !== deviceId));
     setTunnels(prev => prev.filter(t => t.deviceId !== deviceId));
     triggerToast(t(`设备 '${deviceName}' 及其关联隧道端口已被安全卸载从系统中释放.`, `Device '${deviceName}' and all associated tunnels unmounted from the database.`), 'warning');
@@ -733,7 +763,9 @@ export default function App() {
     let nextName: string | null = null;
     try {
       nextName = prompt(t('请输入新的设备主机名称:', 'Please enter the new device hostname:'), device.name);
-    } catch (e) {}
+    } catch (_e) {
+      void _e;
+    }
 
     if (nextName !== null && nextName.trim()) {
       try {
@@ -782,7 +814,9 @@ export default function App() {
             id: String(Date.now() + Math.random()),
             msg: cleanMsg,
           }]);
-        } catch {}
+        } catch (_err) {
+          void _err;
+        }
       };
 
       return () => { logSocket.close(); };
@@ -2473,7 +2507,7 @@ export default function App() {
 
                               <button
                                 type="button"
-                                onClick={() => window.open(`https://github.com/${GITHUB_REPO}`, '_blank')}
+                                onClick={() => window.open('https://github.com/GreenhandTan/FRP-ALL-IN-ONE', '_blank', 'noopener,noreferrer')}
                                 className="w-full mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded font-bold text-xs transition-colors flex items-center justify-center gap-2 border border-slate-700 cursor-pointer select-none"
                               >
                                 <RefreshCw className="w-3.5 h-3.5 text-slate-300" />
@@ -2500,7 +2534,7 @@ export default function App() {
                         <div className="flex items-start justify-between border-b border-border-subtle pb-4">
                           <div>
                             <h2 className="font-headline-md text-headline-md text-on-surface">{t('添加新设备', 'Add New Device')}</h2>
-                            <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('选择客户端架构并注入中继节点', 'Choose client CPU architectures and inject proxy routing nodes.')}</p>
+                            <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('全平台通过容器极速运行，自动从腾讯云公开镜像仓库秒级拉取', 'Unified container-based deployment pulling from Tencent Cloud Registry.')}</p>
                           </div>
                           
                           <button 
@@ -2515,46 +2549,59 @@ export default function App() {
                         {/* OS Interactive card Selection block layout XPath matches */}
                         <div className="py-6 flex flex-col gap-6">
                           <div>
-                            <p className="text-xs font-mono text-outline uppercase font-medium mb-3">{t('选择目标操作系统', 'Choose Target Operating System')}</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <p className="text-xs font-mono text-outline uppercase font-medium mb-3">{t('选择客户端运行环境', 'Choose Client Deployment Environment')}</p>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+
+                              {/* Docker Selector */}
+                              <div 
+                                data-os="docker"
+                                onClick={() => handleSelectOS('docker')}
+                                className="border border-border-subtle hover:border-[#2496ed] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
+                              >
+                                <div className="p-2.5 bg-[#2496ed]/10 text-[#2496ed] rounded-full">
+                                  <Box className="w-5 h-5 shrink-0" />
+                                </div>
+                                <span className="font-headline text-sm font-semibold text-on-surface">{t('Docker (推荐)', 'Docker (Fast)')}</span>
+                                <span className="text-[11px] font-mono text-outline">{t('NAS / 服务器一键命令', 'NAS / Linux One-Liner')}</span>
+                              </div>
                               
                               {/* Linux Selector DIV XPath match */}
                               <div 
                                 data-os="linux"
                                 onClick={() => handleSelectOS('linux')}
-                                className="border border-border-subtle hover:border-[#006782] px-6 py-8 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-3 relative group"
+                                className="border border-border-subtle hover:border-[#006782] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
                               >
-                                <div className="p-3 bg-[#006782]/10 text-[#006782] rounded-full">
-                                  <Terminal className="w-6 h-6 shrink-0" />
+                                <div className="p-2.5 bg-[#006782]/10 text-[#006782] rounded-full">
+                                  <Terminal className="w-5 h-5 shrink-0" />
                                 </div>
                                 <span className="font-headline text-sm font-semibold text-on-surface">Linux</span>
-                                <span className="text-[11px] font-mono text-outline">amd64 / arm64</span>
+                                <span className="text-[11px] font-mono text-outline">{t('自动安装/就绪容器', 'Auto-install Docker')}</span>
                               </div>
 
                               {/* Windows Selector DIV XPath match */}
                               <div 
                                 data-os="windows"
                                 onClick={() => handleSelectOS('windows')}
-                                className="border border-border-subtle hover:border-[#00add8] px-6 py-8 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-3 relative group"
+                                className="border border-border-subtle hover:border-[#00add8] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
                               >
-                                <div className="p-3 bg-[#00add8]/10 text-[#00add8] rounded-full">
+                                <div className="p-2.5 bg-[#00add8]/10 text-[#00add8] rounded-full">
                                   <LayoutGrid className="w-6 h-6 shrink-0" />
                                 </div>
                                 <span className="font-headline text-sm font-semibold text-on-surface">Windows</span>
-                                <span className="text-[11px] font-mono text-outline">x64 / Powershell</span>
+                                <span className="text-[11px] font-mono text-outline">{t('PowerShell 容器部署', 'PowerShell Guide')}</span>
                               </div>
 
                               {/* MacOS Selector DIV XPath match */}
                               <div 
                                 data-os="macos"
                                 onClick={() => handleSelectOS('macos')}
-                                className="border border-border-subtle hover:border-[#da79ef] px-6 py-8 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-3 relative group"
+                                className="border border-border-subtle hover:border-[#da79ef] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
                               >
-                                <div className="p-3 bg-[#da79ef]/10 text-[#da79ef] rounded-full">
+                                <div className="p-2.5 bg-[#da79ef]/10 text-[#da79ef] rounded-full">
                                   <Laptop className="w-6 h-6 shrink-0" />
                                 </div>
                                 <span className="font-headline text-sm font-semibold text-on-surface">macOS</span>
-                                <span className="text-[11px] font-mono text-outline">Apple Silicon / Intel</span>
+                                <span className="text-[11px] font-mono text-outline">{t('终端容器部署', 'Terminal Guide')}</span>
                               </div>
 
                             </div>
@@ -2656,7 +2703,7 @@ export default function App() {
                             <div className="bg-[#161b22] px-4 py-3 border-b border-[#30363d] flex justify-between items-center">
                               <div className="flex items-center gap-2 text-[#8b949e] font-label-sm text-xs font-mono uppercase font-bold text-slate-400">
                                 <TerminalIcon className="w-4 h-4 shrink-0 text-primary-container" />
-                                <span>install_agent.sh</span>
+                                <span>{selectedOs === 'docker' ? 'docker-run.sh' : (selectedOs === 'windows' ? 'install_agent.ps1' : 'install_agent.sh')}</span>
                               </div>
                               <div className="flex items-center gap-2 font-sans font-medium text-xs">
                                 <button 

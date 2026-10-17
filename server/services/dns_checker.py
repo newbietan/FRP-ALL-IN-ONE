@@ -2,38 +2,46 @@
 DNS 检查服务
 验证域名解析是否正确指向本服务器
 """
+from __future__ import annotations
+
+import asyncio
+import logging
 import socket
+from typing import Any
+
 import httpx
 
+logger = logging.getLogger(__name__)
 
-async def get_public_ip() -> str:
+
+async def get_public_ip() -> str | None:
     """获取本机公网 IP"""
+    services = [
+        "https://api.ipify.org?format=json",
+        "https://httpbin.org/ip",
+        "https://ipinfo.io/json",
+    ]
     try:
-        # 尝试多个服务
-        services = [
-            "https://api.ipify.org?format=json",
-            "https://httpbin.org/ip",
-            "https://ipinfo.io/json"
-        ]
         async with httpx.AsyncClient(timeout=5) as client:
             for url in services:
                 try:
                     resp = await client.get(url)
                     data = resp.json()
                     if "ip" in data:
-                        return data["ip"]
+                        return str(data["ip"])
                     if "origin" in data:
-                        return data["origin"]
-                except:
+                        return str(data["origin"])
+                except Exception as e:
+                    logger.debug("从服务 %s 获取公网 IP 失败: %s", url, e)
                     continue
-    except:
-        pass
+    except Exception as e:
+        logger.debug("获取公网 IP 失败: %s", e)
     return None
 
 
-async def check_dns_resolution(domain: str, expected_ip: str = None) -> dict:
+async def check_dns_resolution(domain: str, expected_ip: str | None = None) -> dict[str, Any]:
     """
-    检查域名 DNS 解析
+    检查域名 DNS 解析（异步线程执行，避免阻塞主事件循环）
 
     Args:
         domain: 要检查的域名
@@ -50,13 +58,12 @@ async def check_dns_resolution(domain: str, expected_ip: str = None) -> dict:
         }
     """
     if expected_ip is None:
-        expected_ip = await get_public_ip()
-        if expected_ip is None:
-            expected_ip = "未知(获取失败)"
+        fetched_ip = await get_public_ip()
+        expected_ip = fetched_ip if fetched_ip is not None else "未知(获取失败)"
 
     try:
-        # 解析域名
-        resolved_ip = socket.gethostbyname(domain)
+        # 异步线程解析域名，防止 DNS 缓慢时阻塞 FastAPI 的主事件循环
+        resolved_ip: str = await asyncio.to_thread(socket.gethostbyname, domain)
 
         # 检查是否匹配
         matches = resolved_ip == expected_ip
@@ -68,7 +75,7 @@ async def check_dns_resolution(domain: str, expected_ip: str = None) -> dict:
                 "resolved_ip": resolved_ip,
                 "expected_ip": expected_ip,
                 "matches": True,
-                "message": f"DNS 解析完全匹配：{domain} -> {resolved_ip}"
+                "message": f"DNS 解析完全匹配：{domain} -> {resolved_ip}",
             }
         else:
             return {
@@ -77,7 +84,7 @@ async def check_dns_resolution(domain: str, expected_ip: str = None) -> dict:
                 "resolved_ip": resolved_ip,
                 "expected_ip": expected_ip,
                 "matches": False,
-                "message": f"DNS 解析成功 ({resolved_ip})。与本机获取的 IP ({expected_ip}) 不一致，若使用了 CDN/NAT 属于正常现象，请确保流量能正常触达本机。"
+                "message": f"DNS 解析成功 ({resolved_ip})。与本机获取的 IP ({expected_ip}) 不一致，若使用了 CDN/NAT 属于正常现象，请确保流量能正常触达本机。",
             }
     except socket.gaierror:
         return {
@@ -86,7 +93,7 @@ async def check_dns_resolution(domain: str, expected_ip: str = None) -> dict:
             "resolved_ip": None,
             "expected_ip": expected_ip,
             "matches": False,
-            "message": f"无法解析域名：{domain}。请确保域名已正确添加 A 记录指向 {expected_ip}"
+            "message": f"无法解析域名：{domain}。请确保域名已正确添加 A 记录指向 {expected_ip}",
         }
     except Exception as e:
         return {
@@ -95,5 +102,5 @@ async def check_dns_resolution(domain: str, expected_ip: str = None) -> dict:
             "resolved_ip": None,
             "expected_ip": expected_ip,
             "matches": False,
-            "message": f"DNS 检查失败：{str(e)}"
+            "message": f"DNS 检查失败：{e!s}",
         }

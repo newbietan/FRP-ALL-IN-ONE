@@ -1,19 +1,25 @@
-from sqlalchemy.orm import Session
-from typing import Optional, List
-import models
-import schemas
+from __future__ import annotations
+
 import secrets
 import time
+from typing import Any
 import uuid
+
+from sqlalchemy.orm import Session
+
+import models
+import schemas
 
 
 # ===========================
 # SystemConfig 辅助函数
 # ===========================
 
-def get_config(db: Session, key: str):
+def get_config(db: Session, key: str) -> str | None:
     config = db.query(models.SystemConfig).filter(models.SystemConfig.key == key).first()
-    return config.value if config else None
+    if config and config.value is not None:
+        return str(config.value)
+    return None
 
 def set_config(db: Session, key: str, value: str):
     config = db.query(models.SystemConfig).filter(models.SystemConfig.key == key).first()
@@ -30,7 +36,7 @@ def set_config(db: Session, key: str, value: str):
 # Admin CRUD（GitHub OAuth）
 # ===========================
 
-def get_admin_by_github_id(db: Session, github_id: int) -> Optional[models.Admin]:
+def get_admin_by_github_id(db: Session, github_id: int) -> models.Admin | None:
     return db.query(models.Admin).filter(models.Admin.github_id == github_id).first()
 
 def create_admin_from_github(db: Session, github_id: int, github_username: str, avatar_url: str, is_superadmin: bool = False) -> models.Admin:
@@ -63,8 +69,8 @@ def update_admin_github_id(db: Session, admin_id: int, new_github_id: int, githu
         db.refresh(admin)
     return admin
 
-def get_all_admins(db: Session) -> List[models.Admin]:
-    return db.query(models.Admin).all()
+def get_all_admins(db: Session) -> list[models.Admin]:
+    return list(db.query(models.Admin).all())
 
 def delete_admin(db: Session, admin_id: int) -> bool:
     admin = db.query(models.Admin).filter(models.Admin.id == admin_id).first()
@@ -75,21 +81,20 @@ def delete_admin(db: Session, admin_id: int) -> bool:
     return False
 
 def count_admins(db: Session) -> int:
-    return db.query(models.Admin).count()
-
+    return int(db.query(models.Admin).count())
 
 
 # ===========================
 # Client CRUD
 # ===========================
 
-def get_client(db: Session, client_id: str):
+def get_client(db: Session, client_id: str) -> models.Client | None:
     return db.query(models.Client).filter(models.Client.id == client_id).first()
 
-def get_clients(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Client).offset(skip).limit(limit).all()
+def get_clients(db: Session, skip: int = 0, limit: int = 100) -> list[models.Client]:
+    return list(db.query(models.Client).offset(skip).limit(limit).all())
 
-def create_client(db: Session, client: schemas.ClientCreate):
+def create_client(db: Session, client: schemas.ClientCreate) -> models.Client:
     db_client = models.Client(
         id=str(uuid.uuid4()),
         name=client.name,
@@ -101,7 +106,7 @@ def create_client(db: Session, client: schemas.ClientCreate):
     db.refresh(db_client)
     return db_client
 
-def create_client_with_token(db: Session, name: str):
+def create_client_with_token(db: Session, name: str) -> models.Client:
     db_client = models.Client(
         id=str(uuid.uuid4()),
         name=name,
@@ -114,7 +119,7 @@ def create_client_with_token(db: Session, name: str):
     db.refresh(db_client)
     return db_client
 
-def delete_client(db: Session, client_id: str):
+def delete_client(db: Session, client_id: str) -> bool:
     client = get_client(db, client_id)
     if not client:
         return False
@@ -122,7 +127,7 @@ def delete_client(db: Session, client_id: str):
     db.commit()
     return True
 
-def touch_client(db: Session, client_id: str, status: str = "online"):
+def touch_client(db: Session, client_id: str, status: str = "online") -> models.Client | None:
     client = get_client(db, client_id)
     if not client:
         return None
@@ -137,17 +142,18 @@ def touch_client(db: Session, client_id: str, status: str = "online"):
 # Tunnel CRUD
 # ===========================
 
-def get_tunnels(db: Session, client_id: str):
-    return db.query(models.Tunnel).filter(models.Tunnel.client_id == client_id).all()
+def get_tunnels(db: Session, client_id: str) -> list[models.Tunnel]:
+    return list(db.query(models.Tunnel).filter(models.Tunnel.client_id == client_id).all())
 
-def create_tunnel(db: Session, tunnel: schemas.TunnelCreate, client_id: str):
-    db_tunnel = models.Tunnel(**tunnel.dict(), client_id=client_id)
+def create_tunnel(db: Session, tunnel: schemas.TunnelCreate, client_id: str) -> models.Tunnel:
+    tunnel_data: dict[str, Any] = tunnel.model_dump() if hasattr(tunnel, "model_dump") else tunnel.dict()
+    db_tunnel = models.Tunnel(**tunnel_data, client_id=client_id)
     db.add(db_tunnel)
     db.commit()
     db.refresh(db_tunnel)
     return db_tunnel
 
-def delete_tunnel(db: Session, tunnel_id: int):
+def delete_tunnel(db: Session, tunnel_id: int) -> bool:
     db_tunnel = db.query(models.Tunnel).filter(models.Tunnel.id == tunnel_id).first()
     if db_tunnel:
         db.delete(db_tunnel)
@@ -155,7 +161,7 @@ def delete_tunnel(db: Session, tunnel_id: int):
         return True
     return False
 
-def update_client_name(db: Session, client_id: str, new_name: str):
+def update_client_name(db: Session, client_id: str, new_name: str) -> models.Client | None:
     client = get_client(db, client_id=client_id)
     if not client:
         return None
@@ -164,7 +170,7 @@ def update_client_name(db: Session, client_id: str, new_name: str):
     db.refresh(client)
     return client
 
-def set_tunnel_enabled(db: Session, tunnel_id: int, enabled: bool):
+def set_tunnel_enabled(db: Session, tunnel_id: int, enabled: bool) -> models.Tunnel | None:
     tunnel = db.query(models.Tunnel).filter(models.Tunnel.id == tunnel_id).first()
     if not tunnel:
         return None

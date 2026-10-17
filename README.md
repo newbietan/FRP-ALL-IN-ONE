@@ -1,21 +1,23 @@
 <div align="center">
   <h1>FRP-ALL-IN-ONE</h1>
-  <p>一个基于 Web 的 FRP 内网穿透管理系统：用浏览器完成 <b>FRPS 配置</b>、<b>客户端一键部署</b>、<b>设备注册/心跳</b>、<b>端口映射管理</b>，并提供<b>实时流量监控</b>与<b>系统资源监控</b>。</p>
-  <p><b>极致轻量 · 开箱即用 · 功能强大</b></p>
+  <p>基于 Web 的全容器化 FRP 内网穿透集中管理系统：用现代化浏览器完成 <b>FRPS 服务端配置</b>、<b>设备一键容器化入网</b>、<b>端口映射管理</b>，并提供<b>秒级实时流量与系统资源监控</b>。</p>
+  <p><b>全容器化架构 · 腾讯云公开镜像极速拉取 · 内置定制 FRP v0.71.1 内核</b></p>
   <p>
     <a href="https://github.com/GreenhandTan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/GreenhandTan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/GreenhandTan/FRP-ALL-IN-ONE?style=flat"></a>
+    <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white">
     <img alt="Podman" src="https://img.shields.io/badge/Podman-892CA0?style=flat&logo=podman&logoColor=white">
-    <img alt="Go" src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white">
+    <img alt="FRP Core" src="https://img.shields.io/badge/FRP_Core-v0.71.1-00ADD8?style=flat">
     <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white">
     <img alt="React" src="https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black">
   </p>
   <p>
     <a href="#highlights">核心优势</a> ·
-    <a href="#features">功能特性</a> ·
-    <a href="#quick-start-server">部署指南</a> ·
+    <a href="#architecture">架构说明</a> ·
+    <a href="#quick-start-server">服务端部署</a> ·
+    <a href="#quick-start-client">客户端部署</a> ·
     <a href="#ports">端口放行</a> ·
-    <a href="#troubleshooting">排障</a> ·
+    <a href="#maintainer">维护者发版</a> ·
     <a href="#license">开源协议</a>
   </p>
   <p>
@@ -24,27 +26,6 @@
     <a href="README.zh-TW.md">繁體中文</a>
   </p>
 </div>
-
-> [!CAUTION]
-> **升级提示（V2.5.0-beta）**：本次为重大架构升级 + 前端 UI 重构 + 解决上个版本潜在的遗留问题，**建议旧版本用户直接重新部署**，详见 [升级指南](#upgrade)。
-
-<a id="author"></a>
-
-## 作者与社区
-
-- 博客：https://greenhandtan.top
-
-<a id="stars"></a>
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=newbietan%2FFRP-ALL-IN-ONE&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=newbietan/FRP-ALL-IN-ONE&type=date&theme=dark&legend=top-left&sealed_token=pPnCkRPDgDpy8FdslZM3qbNANgOJHLEJ7J5ehkc1aXAlIJo0dEiTO6JGi67be8pOurV_3KGrxZXEP1ehu8RaeTjI4FpuXnuBkL4d8MTQ9s33Kr89CZLG2w" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=newbietan/FRP-ALL-IN-ONE&type=date&legend=top-left&sealed_token=pPnCkRPDgDpy8FdslZM3qbNANgOJHLEJ7J5ehkc1aXAlIJo0dEiTO6JGi67be8pOurV_3KGrxZXEP1ehu8RaeTjI4FpuXnuBkL4d8MTQ9s33Kr89CZLG2w" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=newbietan/FRP-ALL-IN-ONE&type=date&legend=top-left&sealed_token=pPnCkRPDgDpy8FdslZM3qbNANgOJHLEJ7J5ehkc1aXAlIJo0dEiTO6JGi67be8pOurV_3KGrxZXEP1ehu8RaeTjI4FpuXnuBkL4d8MTQ9s33Kr89CZLG2w" />
- </picture>
-</a>
 
 <a id="demo"></a>
 
@@ -60,103 +41,23 @@
 <br/><br/>
 <img src="demo5.png" alt="Demo 5" width="900" />
 
-<a id="toc"></a>
-
-## 目录
-
-- [核心优势](#highlights)
-- [核心特性](#features)
-- [架构说明](#architecture)
-- [快速开始（服务端）](#quick-start-server)
-- [升级指南](#upgrade)
-- [首次使用流程](#first-time-workflow)
-- [HTTPS 配置（可选）](#https-setup)
-- [NAT 访问端口配置（可选）](#nat-port-setup)
-- [飞牛 OS 客户端部署说明](#fnos-client)
-- [端口与安全组](#ports)
-- [监控与统计说明](#monitoring)
-- [常用运维命令](#ops)
-- [排障指南](#troubleshooting)
-- [卸载客户端](#uninstall)
-- [项目结构](#layout)
-- [开发与构建](#development)
-- [开源协议与使用要求](#license)
+---
 
 <a id="highlights"></a>
 
 ## 核心优势
 
-### 极致轻量
-
-- **1核1G 服务器即可流畅运行**：经过实际测试，最低配置（1 vCPU + 1 GB RAM）的云服务器完全满足系统部署与运行需求
-- **前端现代化技术栈**：React 19 + TypeScript + Vite + Tailwind CSS，类型安全、构建高效、样式优雅
-- **轻量后端技术栈**：FastAPI + SQLite，无需 MySQL/PostgreSQL，数据文件仅数 MB，极低磁盘与内存占用
-- **容器极度精简**：Nginx Alpine 镜像 + 静态文件，Web 容器内存占用 < 10 MB
-
-> **实例：超低配 LXC 服务器实测**  
-> 通过「**本地构建 + 云端导入**」的特殊部署手法（在本地构建好项目镜像后导入云服务器，绕过内存不足的构建限制），本项目可在 **1核 256MB 内存 + 2G 数据盘** 的 LXC 架构云服务器上流畅运行，实现完整的内网穿透集中管理。作者实测机器售价仅 **¥29.9 / 三年**，极具性价比。详细部署思路参见：[作者博客 Blog#25](https://greenhandtan.top/blog/25)
-
-### 开箱即用
-
-- **一条命令完成全部部署**：`git clone` + 执行 `deploy.sh`，自动处理依赖安装、容器构建、服务启动
-- **可视化配置向导**：首次登录后通过 Web 界面的引导向导完成 FRPS 配置（IP/域名模式可选），无需手动编辑任何配置文件
-- **客户端脚本自动生成**：在控制台一键生成针对不同平台（Linux/macOS/Windows）、不同架构（x86/ARM/MIPS）的部署脚本，复制后直接在内网机器执行
-- **NAT 穿透兼容**：支持在 NAT 环境下显式配置管理面板公网访问端口（如 `公网IP:10967 → 内网80`），生成的客户端脚本自动使用正确地址
-
-### 功能强大
-
-- **WebSocket 实时推送**：每 3 秒推送全局状态，每个客户端的 CPU/内存/磁盘/网络指标实时可见，无需手动刷新
-- **配置热重载**：通过 FRPC Admin API 动态增删端口映射，通道变更立即生效，无需重启 frpc 进程
-- **HTTPS 全自动**：域名模式下一键申请 Let's Encrypt 证书并自动续期（到期前 30 天）
-- **多架构 Agent**：Go 编写的 frp-agent 支持 x86_64 / ARM64 / ARMv7 / MIPS，覆盖树莓派、路由器等各类设备
-- **完善的安全机制**：GitHub OAuth 认证、JWT 鉴权、API 限流、邀请制访问控制、Nginx 安全响应头，生产级别安全保障
+- 🚀 **全流程容器化（免拉取源码编译）**：服务端与客户端全面采用容器镜像部署，无需在宿主机安装任何 Node.js、Go、Python 编译环境，告别繁重的本地构建。
+- ⚡ **腾讯云公开镜像极速分发**：所有组件统一收拢至腾讯云公开容器镜像仓库（TCR），国内网络享受千兆 CDN 极速秒拉，彻底告别 DockerHub 限流与 GitHub 网络超时。
+- 📦 **客户端单镜像自闭环**：客户端统一拉取 `frp-agent:latest` 容器，**不区分芯片型号与硬件架构**（x86/ARM 通用自适应），内置定制裁剪版 FRP v0.71.1 穿透引擎，免去外部解压配置。
+- 🛡️ **生产级安全防护**：
+  - 首登超级管理员白名单防护（防止公网抢占）
+  - FRPS 默认强随机密钥（防止 7000 端口未授权穿透）
+  - 后端严格绑定本地回环，具备安全反代感知限流（防止全局误封）
+  - 自动申请 Let's Encrypt TLS 证书并后台无缝续期
+- 📊 **毫秒级事件驱动监控**：WebSocket 实时流式推送客户端 CPU、内存、实时网络出入速率及流量统计，配置变更内存级热重载生效。
 
 ---
-
-<a id="features"></a>
-
-## 核心特性
-
-### 部署与管理
-
-- **一键部署**：Podman Compose 启动管理后台、Web、FRPS
-- **配置向导**：Web 界面完成 FRPS 端口、Token、公网 IP 设置
-- **一键脚本**：自动生成客户端部署脚本（支持多架构、systemd / OpenRC / launchd、开机自启）
-- **HTTPS 全自动**：一键申请 Let's Encrypt 证书并自动续期
-- **NAT 端口配置**：支持 NAT 云服务器显式指定管理面板公网端口，脚本生成自动感知
-
-### 安全增强
-
-- **GitHub OAuth 认证**：使用 GitHub 账号登录，系统不绑定任何凭据，用户自行提供 OAuth App 信息
-- **邀请制访问控制**：首个登录用户自动成为超级管理员，后续用户需被邀请才能访问
-- **管理员管理**：超级管理员可在控制台邀请/移除 GitHub 用户，管理管理员列表
-- **高阶 JWT 保护**：基于内存的无状态 Ephemeral JWT Keys（防数据库脱库），支持环境变量 `SECRET_KEY` 注入多节点
-- **网络隔离防御**：将后端管理端口严格绑定至 127.0.0.1，防公网直连绕过 Nginx，并具备强正则校验阻断 Nginx 配置注入
-- **API 限流**：登录 5次/分钟，证书申请 3次/小时，防止暴力破解
-- **安全响应头**：Nginx 配置 `X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy` 等安全头，防止 MIME 嗅探、点击劫持等攻击
-- **证书智能化管理**：Let's Encrypt 证书自动续期（后台 Python 异步守护任务，去除臃肿的 crond），支持控制台查看证书剩余时间与一键手动续期
-
-### 实时监控
-
-- **实时流量监控**：Agent 每 3 秒采集网络流量速率，WebSocket 实时推送
-- **系统资源监控**：CPU、内存、磁盘使用率实时显示
-- **累计流量统计**：顶部卡片展示所有客户端的累计总流量
-- **隧道流量统计**：每个隧道独立显示累计流量
-
-### Agent 机制
-
-- **自动注册**：客户端自动上报 hostname、OS、架构，自动命名设备
-- **心跳上报**：定时上报系统指标（CPU、内存、磁盘、网络速率）
-- **配置热重载**：通过 FRPC Admin API 热重载配置，无需重启服务
-- **实时日志**：WebSocket 推送 FRPC 运行日志到控制台
-- **协议自适应**：Agent 自动检测服务器协议（ws/wss）并切换
-
-### 其他特性
-
-- **WebSocket 实时推送**：每 3 秒推送状态更新，无需手动刷新
-- **国际化**：支持简体中文/英文/繁体中文三语切换
-- **现代化前端**：React + TypeScript + Vite 构建，TypeScript 类型安全，Vite 秒级热更新
-- **数据持久化**：SQLite 数据库和证书自动持久化到 Podman 卷
 
 <a id="architecture"></a>
 
@@ -164,534 +65,186 @@
 
 ```mermaid
 flowchart TB
-    subgraph Server["服务端 Podman Compose"]
-        Web["Web<br/>Nginx Alpine + React/Vite<br/>:8080/TCP 或 :443/TCP"]
-        Backend["Backend<br/>FastAPI + SQLite<br/>WebSocket 实时推送"]
-        FRPS["FRPS<br/>FRP Server<br/>:7000 + :7500"]
+    subgraph TCR["腾讯云公开镜像仓库 (TCR)"]
+        FRPS_IMG["frps:latest<br/>定制裁剪 v0.71.1 内核"]
+        BACKEND_IMG["frp-backend:latest<br/>FastAPI + SQLite"]
+        FRONTEND_IMG["frp-frontend:latest<br/>React + Nginx"]
+        AGENT_IMG["frp-agent:latest<br/>内置穿透引擎统一镜像"]
+    end
+
+    subgraph Server["服务端 VPS (Docker / Podman Compose)"]
+        Web["Web 界面<br/>:8080 / :443"]
+        Backend["管理后端<br/>127.0.0.1:8000"]
+        FRPS["FRPS 内核<br/>:7000 穿透 + 127.0.0.1:7500 API"]
         Web <--> Backend
-        Backend <--> FRPS
+        Backend <-->|"API 热重载"| FRPS
     end
 
-    subgraph Client["客户端"]
-        Agent["frp-agent Go<br/>WebSocket 连接管理端<br/>自动注册设备<br/>每3秒采集系统指标<br/>配置热重载"]
-        FRPC["frpc<br/>与 FRPS 建立连接<br/>承载代理转发"]
-        Agent --> FRPC
+    subgraph Clients["客户端设备 (NAS / 云主机 / PC / 路由器)"]
+        DockerClient["容器化 Agent<br/>frp-agent:latest<br/>内置穿透引擎 + 指标监控"]
     end
 
-    Backend <-.->|"WebSocket<br/>心跳/指标/日志<br/>ws:// 或 wss://"| Agent
-    FRPS <-->|"控制连接<br/>数据转发"| FRPC
+    FRPS_IMG -.->|"一键拉取"| FRPS
+    BACKEND_IMG -.->|"一键拉取"| Backend
+    FRONTEND_IMG -.->|"一键拉取"| Web
+    AGENT_IMG -.->|"国内极速拉取"| DockerClient
+
+    DockerClient <-.->|"WebSocket 指标/日志"| Backend
+    DockerClient <-->|"FRP 数据隧道"| FRPS
 ```
-
-<a id="quick-start-server"></a>
-
-## 快速开始（服务端）
-
-### 前置要求
-
-- 一台具备公网 IP 的服务器（**建议 Linux 系统，最低 1核1G 即可流畅运行**，实测验证）
-- Podman & Podman Compose（脚本可自动安装）
-- 端口放行（至少）：8080/TCP、FRPS 端口（默认 7000/TCP）
-- 一个 GitHub 账号（用于登录和创建 OAuth App）
-
-> **系统建议**：本项目基于 Podman 部署，脚本支持自动识别 Linux 发行版并安装依赖（含 Alpine / Debian / Ubuntu / RHEL 系）。Windows 和 macOS 可作为客户端运行，服务端建议使用 Linux。
-
-> **轻量提示**：前端为 React 构建的静态文件，Nginx 容器内存占用 < 10 MB；后端 FastAPI + SQLite，整套系统在 1核1G 机器上运行绰绰有余。
-
-### 创建 GitHub OAuth App（必须）
-
-本系统使用 GitHub OAuth 进行登录认证，你需要创建自己的 GitHub OAuth App：
-
-1. 打开 https://github.com/settings/developers
-2. 点击 **New OAuth App**
-3. 填写信息：
-   - **Application name**：`FRP Manager`（或任意名称）
-   - **Homepage URL**：`http://<你的服务器IP>:8080`（或你的域名）
-   - **Authorization callback URL**：`http://<你的服务器IP>:8080/api/auth/github/callback`
-4. 点击 **Register application**
-5. 复制 **Client ID**
-6. 点击 **Generate a new client secret**，复制 **Client Secret**
-
-然后在部署前设置环境变量：
-
-```bash
-export GITHUB_CLIENT_ID="你的Client ID"
-export GITHUB_CLIENT_SECRET="你的Client Secret"
-```
-
-也可以在 `compose.yml` 同目录下创建 `.env` 文件：
-
-```env
-GITHUB_CLIENT_ID=你的Client ID
-GITHUB_CLIENT_SECRET=你的Client Secret
-```
-
-> **安全说明**：系统不内置任何 GitHub 凭据，每个用户必须提供自己的 OAuth App 信息。
-
-### 一键部署
-
-```bash
-git clone https://github.com/GreenhandTan/FRP-ALL-IN-ONE.git
-cd FRP-ALL-IN-ONE/deploy
-
-chmod +x deploy.sh
-sudo ./deploy.sh
-```
-
-### 首次登录
-
-部署完成后，访问 `http://<服务器IP>:8080`，点击 **Sign in with GitHub** 按钮。
-
-**首个登录的 GitHub 用户将自动成为超级管理员**，之后只有被邀请的 GitHub 用户才能登录。
-
-超级管理员可以在控制台的「管理员管理」中邀请其他 GitHub 用户。
-
-### 低内存服务器（512MB 或更低）
-
-如服务器内存低于 1 GB，建议先开启 Swap 再部署：
-
-```bash
-cd FRP-ALL-IN-ONE/deploy
-chmod +x setup-swap.sh
-sudo ./setup-swap.sh   # 创建 2GB Swap
-sudo ./deploy.sh
-```
-
-> 1核1G 的服务器通常无需开启 Swap 即可直接部署。
-
-### 数据持久化
-
-当前 `compose.yml` 已默认启用数据持久化：
-
-- `frp-data`：FRP 配置文件持久化
-- `frp-certs`：SSL 证书持久化
-- `./data`：SQLite 数据库持久化
-
-<a id="upgrade"></a>
-
-## 升级指南
-
-> [!CAUTION]
-> **V2.5.0-beta 为重大架构升级**（GitHub OAuth 登录 + 前端 UI 全面重构 + 安全加固），数据库结构和前端代码均有不兼容变更。**建议直接重新部署**，无需手动执行数据库迁移。
-
-### 重新部署（推荐）
-
-```bash
-cd FRP-ALL-IN-ONE/deploy
-podman compose -f compose.yml down
-cd ..
-mv deploy/data deploy/data.bak   # 备份旧数据（可选）
-git pull
-cd deploy
-sudo ./deploy.sh
-```
-
-> 如需保留旧数据，备份 `deploy/data` 目录后重新部署即可。首次登录的 GitHub 用户将自动成为超级管理员。
-
-<a id="first-time-workflow"></a>
-
-## 首次使用流程
-
-### 1) 登录管理台
-
-访问：`http://<服务器公网IP>:8080`，点击 **Sign in with GitHub**，使用你的 GitHub 账号登录。
-
-**首个登录的 GitHub 用户将自动成为超级管理员**，之后只有被邀请的 GitHub 用户才能登录。超级管理员可在控制台的「管理员管理」中邀请其他 GitHub 用户。
-
-### 2) 配置 FRPS（向导）
-
-在向导中设置：
-
-- 监听端口（默认 7000）
-- 公网 IP（支持自动探测）
-
-### 3) 部署客户端
-
-在向导"客户端脚本"页面下载脚本，在内网机器执行：
-
-```bash
-chmod +x deploy-frpc.sh
-sudo ./deploy-frpc.sh
-```
-
-### 4) 创建端口映射
-
-在控制台"设备列表"中：
-
-1. 选择设备 → 新增映射（TCP/UDP/HTTP/HTTPS）
-2. 等待 Agent 同步并热重载
-3. 通过 `公网IP:remote_port` 访问内网服务
-
-<a id="https-setup"></a>
-
-## HTTPS 配置（可选）
-
-1. 进入"系统设置 → 域名与 HTTPS"
-2. 输入你的域名（如 `frp.example.com`）
-3. 按提示将域名 A 记录解析到服务器公网 IP
-4. 点击"检测 DNS"验证解析是否正确
-5. 点击"启用 HTTPS"，系统将自动：
-   - 临时监听 80 端口并重载 Nginx
-   - 启动 acme.sh 并以独立模式在 90 端口挑战验证（由 Nginx 80 转发）
-   - 申请 Let's Encrypt 证书
-   - 覆写并部署正式 Nginx HTTPS 配置
-   - 重载服务
-6. 完成后自动跳转到 `https://你的域名`
-
-> **自动续期**：证书将在过期前 30 天由后台 Python 守护线程定时（每24小时）自动续期，无需手动干预。
-> 
-> **注意**：由于证书验证（HTTP-01 挑战）必须通过公网 80 端口，请确保服务器的 **80 端口** 在安全组/防火墙中已对公网放行。
-
-<a id="nat-port-setup"></a>
-
-## NAT 访问端口配置（可选）
-
-> **适用场景**：你的云服务器不是直接使用公网 IP 部署，而是通过 NAT 端口映射访问，例如：
-> `公网 151.242.85.89:10967` → 内网 `服务器:8080`（管理面板走 NAT 映射）
-
-在这种场景下，如果不做额外配置，系统生成的客户端安装脚本中会使用默认端口（默认 `8080`，若启用了 HTTPS 则为 `443`），导致 Agent 无法连接到管理面板（需使用 NAT 映射的公网端口）。
-
-### 配置方式
-
-1. 登录管理控制台，点击右上角**齿轮图标**（⚙）
-2. 在「管理面板公网访问端口」一栏填写 NAT 映射的公网端口（如 `10967`）
-3. 点击「保存」
-
-配置保存后，之后生成的所有客户端安装脚本将自动使用：
-
-```
-ws://151.242.85.89:10967/ws/agent/<CLIENT_ID>
-```
-
-### 地址解析优先级
-
-脚本生成时 `MANAGER_WS_URL` 的地址按以下优先级确定：
-
-| 优先级 | 条件                             | 使用的地址                 |
-| ------ | -------------------------------- | -------------------------- |
-| ① 最高 | 已通过设置页面配置 NAT 端口      | 若开启 HTTPS: `wss://域名:NAT端口`<br/>否则: `ws://公网IP:NAT端口` |
-| ②      | 浏览器请求携带 Host 头（含端口） | `ws://Host头中的host:port` |
-| ③      | 已启用 HTTPS + 配置域名          | `wss://域名`               |
-| ④ 兜底 | 其余情况                         | `ws://公网IP:8080` (若开启 HTTPS 则为 `wss://域名:443`) |
-
-> **普通云服务器**：无需任何配置，留空即可，系统自动使用公网 IP。
-
-<a id="fnos-client"></a>
-
-## 飞牛 OS 客户端部署说明
-
-可以，但需要区分“Agent 能运行”和“当前一键脚本能直接运行”这两件事。
-
-- **可以作为客户端部署**：飞牛 OS 本质上属于 Linux 环境，只要设备架构是 `x86_64` 或 `arm64`，理论上即可运行本项目的 Linux Agent。
-- **当前一键脚本兼容多种 init 系统**：自动检测 systemd（主流发行版）、OpenRC（Alpine 等），无 init 系统时自动降级为 nohup 后台运行。
-- **若飞牛 OS 提供标准 Linux 用户态**：可直接尝试使用控制台生成的 Linux 客户端脚本安装。
-- **若飞牛 OS 不带 systemd/OpenRC 或限制系统服务**：脚本会自动降级为 nohup 后台运行模式，Agent 和 frpc 仍可正常工作。
-
-建议先在飞牛 OS 上检查以下命令：
-
-```bash
-uname -m
-command -v systemctl || command -v rc-update
-command -v curl
-command -v wget
-test -w /opt || sudo test -w /opt
-```
-
-判定原则：
-
-- 输出为 `x86_64` 或 `aarch64`：架构满足。
-- 存在 `systemctl` 或 `rc-update`，且 `/opt` 可写：可直接使用当前脚本。
-- 两者都不存在：脚本会自动降级为 nohup 后台运行，仍可正常使用。
-
-<a id="ports"></a>
-
-## 端口与安全组
-
-| 端口                      | 协议    | 用途                        |
-| ------------------------- | ------- | --------------------------- |
-| 8080                      | TCP     | Web 管理界面（HTTP 默认端口，启用 HTTPS 前必选） |
-| 80                        | TCP     | HTTP 自动跳转及 HTTPS 证书挑战验证（启用 HTTPS 时必选） |
-| 443                       | TCP     | Web 管理界面（HTTPS 端口，可选） |
-| 7000（或自定义 bindPort） | TCP     | frpc 控制连接               |
-| 49152-65535               | TCP/UDP | 推荐的私有端口范围          |
-
-> 每个 `remote_port` 都需要在安全组中放行才能从外部访问。
-
-<a id="monitoring"></a>
-
-## 监控与统计说明
-
-### 数据刷新频率
-
-| 环节                 | 刷新频率                |
-| -------------------- | ----------------------- |
-| Agent 系统指标采集   | 每 3 秒                 |
-| WebSocket 推送到前端 | 每 3 秒（随 Agent 采集） |
-| 前端实时速率更新     | 每次消息到达立即刷新    |
-| 前端 CPU/内存/磁盘   | 每 3 次消息刷新一次     |
-| FRPS 状态缓存刷新    | 每 10 秒                |
-| 证书续期检查         | 每 24 小时              |
-
-### 流量统计口径
-
-| 指标                      | 说明                                              |
-| ------------------------- | ------------------------------------------------- |
-| 顶部"总流量"              | 所有客户端的机器级别累计流量（包含所有网络流量）  |
-| 客户端卡片"传入/传出流量" | 该客户端的实时网络速率（B/s、KB/s、MB/s）         |
-| 隧道"总流量"              | 该隧道的累计流量（来自 FRPS API，连接关闭后更新） |
-
-### 在线状态判断
-
-- Agent 心跳 `last_seen` 在 30 秒内视为在线
-- WebSocket 连接状态实时显示
-
-<a id="ops"></a>
-
-## 常用运维命令
-
-### 服务端（Podman）
-
-```bash
-cd FRP-ALL-IN-ONE/deploy
-
-# 查看状态
-podman compose -f compose.yml ps
-podman compose -f compose.yml logs -f
-
-# 重启服务
-podman compose -f compose.yml restart
-podman restart frps
-
-# 更新到最新版本（镜像从 TCR 拉取）
-podman compose -f compose.yml down
-podman compose -f compose.yml pull
-podman compose -f compose.yml up -d
-
-# 查看证书续期日志
-podman exec frp-manager-backend cat /var/log/acme.cron.log
-```
-
-### 客户端
-
-**Linux (systemd)**：
-
-```bash
-systemctl status frp-agent --no-pager
-journalctl -u frp-agent -n 200 --no-pager
-```
-
-**Linux (OpenRC / Alpine)**：
-
-```bash
-rc-service frp-agent status
-cat /opt/frp/logs/*.log
-```
-
-**macOS (launchd)**：
-
-```bash
-launchctl list | grep frp-agent
-cat /opt/frp/logs/*.log
-```
-
-<a id="troubleshooting"></a>
-
-## 排障指南
-
-### 端口映射创建了但访问不了
-
-1. **检查外网连通性**（在非服务器本机测试）
-
-   ```bash
-   nc -vz <公网IP> <remote_port>
-   ```
-
-2. **检查安全组/防火墙**：确认端口已放行
-
-3. **检查 FRPS 是否监听**
-
-   ```bash
-   ss -lntp | grep :<remote_port>
-   podman logs frps --tail 200
-   ```
-
-4. **检查客户端配置同步**
-   ```bash
-   grep -n "<remote_port>" /opt/frp/frpc.toml
-   journalctl -u frp-agent -n 200 --no-pager
-   ```
-
-### 设备无法注册/不显示
-
-```bash
-systemctl status frp-agent --no-pager
-cat /opt/frp/agent.json
-```
-
-确认 Agent 服务正常运行且能连接到管理端。
-
-### HTTPS 证书申请失败
-
-1. **检查 DNS 解析**：确保域名 A 记录已正确指向服务器公网 IP
-2. **检查端口 8080**：Let's Encrypt 验证需要使用 8080 端口
-3. **查看日志**：`podman logs frp-manager-backend | grep -i "cert\|acme"`
-4. **手动触发续期**：在 Web 界面点击"续期证书"按钮
-
-<a id="uninstall"></a>
-
-## 卸载客户端
-
-```bash
-cd FRP-ALL-IN-ONE/deploy
-chmod +x uninstall-frpc.sh
-sudo ./uninstall-frpc.sh
-```
-
-<a id="layout"></a>
-
-## 项目结构
-
-```
-FRP-ALL-IN-ONE/
-├── frontend/               # Web 界面（React + TypeScript + Vite + Tailwind CSS）
-│   ├── src/
-│   │   ├── App.tsx         # 主应用组件（路由、页面、状态管理）
-│   │   ├── api.ts          # HTTP API 模块（对接后端 REST API）
-│   │   ├── ws.ts           # WebSocket 模块（实时数据推送）
-│   │   ├── types.ts        # TypeScript 类型定义
-│   │   ├── data.ts         # 静态数据与脚本生成
-│   │   └── index.css       # 全局样式（Tailwind CSS）
-│   ├── index.html          # 单页应用入口
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── Dockerfile          # 多阶段构建：Node 编译 + Nginx 部署
-├── server/                # 后端 API（FastAPI + SQLite）
-│   ├── main.py             # 应用入口，WebSocket 端点
-│   ├── auth.py             # JWT 认证与 GitHub OAuth
-│   ├── models.py           # 数据库模型
-│   ├── schemas.py          # Pydantic 数据校验
-│   ├── crud.py             # 数据库增删改查
-│   ├── database.py         # SQLite 数据库连接
-│   ├── frp_deploy.py       # FRPS 部署与配置生成
-│   ├── websocket_manager.py # WebSocket 连接管理器
-│   ├── Dockerfile
-│   ├── core/               # 核心基础设施
-│   │   ├── dependencies.py    # 依赖注入（认证、数据库）
-│   │   ├── container_engine.py # Podman 容器引擎
-│   │   ├── rate_limit.py      # API 限流
-│   │   └── exceptions.py      # 统一异常处理
-│   ├── routers/            # API 路由
-│   │   ├── auth.py            # 认证（GitHub OAuth、管理员管理）
-│   │   ├── clients.py         # 客户端、隧道管理
-│   │   ├── agents.py          # Agent 管理、指标查询
-│   │   ├── frp_server.py      # FRPS 管理、安装脚本
-│   │   ├── system.py          # 系统状态
-│   │   └── settings.py        # 域名与 HTTPS 设置
-│   └── services/           # 业务逻辑层
-│       ├── dashboard.py       # Dashboard 数据聚合
-│       ├── tls_manager.py     # 证书申请、Nginx 配置
-│       └── dns_checker.py     # DNS 解析验证
-├── agent/                  # 设备端 Agent（Go 语言）
-│   ├── cmd/frp-agent/      # 主程序入口
-│   ├── internal/           # 内部模块
-│   │   ├── config/         #   配置管理
-│   │   ├── frpc/           #   FRPC 进程管理
-│   │   ├── monitor/        #   系统监控（CPU/内存/磁盘/网络）
-│   │   ├── ws/             #   WebSocket 客户端
-│   │   └── logger/         #   日志采集
-│   ├── scripts/            # 安装脚本模板
-│   ├── go.mod
-│   └── Makefile
-├── deploy/                 # 部署脚本 & compose
-│   ├── compose.yml         # Docker Compose 编排（从 TCR 拉取镜像）
-│   ├── deploy.sh           # 一键部署脚本
-│   ├── frps.toml           # FRPS 配置模板
-│   ├── setup-swap.sh       # Swap 创建脚本
-│   └── uninstall-frpc.sh   # Agent 卸载脚本
-├── .github/workflows/      # CI/CD
-│   ├── build-and-push.yml  #   构建推送 Docker 镜像到腾讯云 TCR
-│   └── release-agent.yml   #   编译发布 Agent 到 GitHub Releases
-├── demo1.png               # 演示截图 1
-├── demo2.png               # 演示截图 2
-├── demo3.png               # 演示截图 3
-├── demo4.png               # 演示截图 4
-└── demo5.png               # 演示截图 5
-```
-
-<a id="development"></a>
-
-## 开发与构建
-
-### 前端
-
-前端基于 React + TypeScript + Vite + Tailwind CSS，需 Node.js 环境：
-
-```bash
-cd frontend
-npm install
-npm run dev     # 启动开发服务器 http://localhost:3000
-npm run build   # 构建生产版本到 dist/
-npm run lint    # TypeScript 类型检查
-```
-
-### Agent
-
-```bash
-cd agent
-make dev            # 构建当前平台
-make all            # 构建所有平台（产物在 dist/ 目录）
-```
-
-Linux 平台使用 `CGO_ENABLED=0` 编译静态链接二进制，兼容 Alpine (musl) 和普通发行版 (glibc)：
-
-```bash
-# Linux ARM64（树莓派等）
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o frp-agent-linux-arm64 ./cmd/frp-agent
-# Linux x86_64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o frp-agent-linux-amd64 ./cmd/frp-agent
-```
-
-### 后端
-
-后端以 Podman 方式运行最稳定；如需本地运行可参考 `server/` 目录。
-
-```bash
-cd server
-pip install -r requirements.txt
-python -m uvicorn main:app --reload
-```
-
-<a id="license"></a>
-
-## 开源协议与使用要求
-
-本项目采用 **MIT License**（见 [LICENSE](LICENSE)）。
-
-你可以：
-
-- 免费使用（个人/组织）
-- 免费商用
-- 修改、二次开发、分发
-
-你需要遵守：
-
-- 保留许可证与版权声明
-- 注明原作者为 **newbietan**
-
-## 安全建议
-
-- 及时邀请可信的 GitHub 用户，移除不再需要的管理员
-- 每次重新部署会自动重新生成 `SECRET_KEY`，旧登录会话立即失效
-- 定期更新 Podman 镜像（宿主机 Podman 版本需 >= 4.0，部署脚本会自动检查）
-- 安全组仅开放必要端口
-- FRPS Dashboard（7500）建议仅允许本机访问
-- 启用 HTTPS 以加密通信（推荐生产环境使用）
-
-## 致谢
-
-- [FRP](https://github.com/fatedier/frp) - 优秀的内网穿透工具
-- [gopsutil](https://github.com/shirou/gopsutil) - Go 系统监控库
-- [acme.sh](https://github.com/acmesh-official/acme.sh) - 全功能 Let's Encrypt 客户端
 
 ---
 
-如果这个项目对您有帮助，欢迎给我们一个 Star。
+<a id="quick-start-server"></a>
+
+## 服务端部署指南
+
+> **提示**：无需使用 `git clone` 拷贝项目源码！服务端仅需通过标准容器编排拉取公开镜像即可启动。
+
+### 1. 准备 GitHub OAuth App
+
+本系统使用 GitHub OAuth 进行管理员认证，请先创建属于你的 OAuth App：
+
+1. 打开 [GitHub Developer Settings](https://github.com/settings/developers)
+2. 点击 **New OAuth App** 填写：
+   - **Application name**：`FRP Manager`（或自定义名称）
+   - **Homepage URL**：`http://<你的服务器IP>:8080`（或你的域名）
+   - **Authorization callback URL**：`http://<你的服务器IP>:8080/api/auth/github/callback`
+3. 创建后记录 **Client ID**，并生成 **Client Secret**。
+
+---
+
+### 2. 一键极速部署（推荐）
+
+直接在服务器执行自动化部署脚本（自动识别系统、就绪 Docker/Podman 并从腾讯云镜像源秒级拉取启动）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
+```
+
+脚本将引导填写 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET` 以及**初始管理员 GitHub 用户名**（开启防抢占防护）。
+
+---
+
+### 3. 或者通过标准 Docker Compose 部署
+
+若习惯手动管理 Compose 配置：
+
+```bash
+mkdir -p frp-manager && cd frp-manager
+
+# 下载标准化 compose 编排文件
+curl -fsSL https://raw.githubusercontent.com/GreenhandTan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
+
+# 创建环境变量配置文件
+cat > .env <<EOF
+GITHUB_CLIENT_ID=你的ClientID
+GITHUB_CLIENT_SECRET=你的ClientSecret
+SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
+INITIAL_ADMIN_GITHUB_USERNAME=你的GitHub用户名
+EOF
+
+# 一键拉取并启动服务
+docker compose up -d
+```
+
+启动完成后，打开浏览器访问 `http://<服务器IP>:8080` 即可开始使用。
+
+---
+
+<a id="quick-start-client"></a>
+
+## 客户端部署指南
+
+客户端彻底告别传统的硬件架构选择（如 x86/ARM/MIPS）与外部解压流程，**全平台统一运行定制容器镜像**，零消耗服务端 VPS 出网带宽。
+
+登录管理后台，进入「设备管理」→ 点击「添加新设备」，直接复制对应的自适应命令即可：
+
+### 方式 1：Docker 一键运行（NAS / 服务器推荐）
+
+适用于已安装 Docker 的设备（如群晖/威联通 NAS、软路由、Linux 主机）：
+
+```bash
+docker run -d \
+  --name frp-agent \
+  --network host \
+  --restart always \
+  -e FRP_AGENT_TOKEN="<控制台生成的Token>" \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest \
+  -server "ws://<你的服务器IP>:8080/ws/agent/<设备ID>" \
+  -id "<设备ID>"
+```
+
+### 方式 2：Linux 一键脚本（自动检测安装容器）
+
+自动检测本机环境，若未安装 Docker/Podman 会自动通过官方安全源就绪并启动客户端容器：
+
+```bash
+curl -fsSL http://<你的服务器IP>:8080/api/frp/agent/install-script/linux?client_id=<设备ID> | sudo bash
+```
+
+### 方式 3：Windows 部署（PowerShell）
+
+在以管理员权限运行的 PowerShell 中执行：
+
+```powershell
+irm http://<你的服务器IP>:8080/api/frp/agent/install-script/windows?client_id=<设备ID> | iex
+```
+
+### 方式 4：macOS 部署（终端）
+
+在终端中执行：
+
+```bash
+curl -fsSL http://<你的服务器IP>:8080/api/frp/agent/install-script/darwin?client_id=<设备ID> | bash
+```
+
+---
+
+<a id="ports"></a>
+
+## 端口放行建议
+
+请确保云服务器防火墙 / 安全组放行以下必要端口：
+
+| 端口 | 协议 | 用途说明 |
+| :--- | :--- | :--- |
+| **8080** | TCP | Web 管理控制台（默认访问端口） |
+| **80** | TCP | HTTP 自动跳转及 Let's Encrypt 证书申请验证（启用 HTTPS 时必选） |
+| **443** | TCP | Web 控制台 HTTPS 访问（启用 HTTPS 后可选） |
+| **7000** | TCP | FRP 穿透隧道主连接端口 |
+| **自定义区间** | TCP/UDP | 你映射出的远程服务端口（如 6001、8081 等） |
+
+---
+
+<a id="maintainer"></a>
+
+## 开源维护者发版说明
+
+本项目为开源维护者提供了一键全自动流水线，只需执行一行命令，即可完成定制版内核编译、前端打包，并全量推送到腾讯云公开镜像仓库：
+
+```bash
+# 构建并全量推送到腾讯云 TCR (frps, frp-backend, frp-frontend, frp-agent)
+sh deploy/build-and-push.sh [版本Tag，默认 latest]
+```
+
+---
+
+<a id="troubleshooting"></a>
+
+## 常见排障
+
+1. **GitHub 登录后提示 `initial_admin_mismatch`？**
+   - 说明你在 `.env` 中指定了 `INITIAL_ADMIN_GITHUB_USERNAME`，但当前登录的账号与预设不符，系统自动拦截了越权激活。
+2. **端口映射成功但外网无法访问？**
+   - 检查云服务器控制台的安全组规则，确认对应的远程端口是否已开放 TCP/UDP 流量。
+3. **域名 HTTPS 证书申请失败？**
+   - 确认域名 A 记录已完全解析到服务器公网 IP，且安全组的 **80 端口** 已对外开放（用于 Let's Encrypt 挑战验证）。
+
+---
+
+<a id="license"></a>
+
+## 开源协议
+
+本项目采用 [Apache-2.0](LICENSE) 协议开源。定制版内核遵循 [FRP 原版开源许可](https://github.com/fatedier/frp/blob/dev/LICENSE)。

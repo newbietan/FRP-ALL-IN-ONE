@@ -3,18 +3,17 @@
 # ============================================================
 # 触发条件：
 #   1. 手动触发 (workflow_dispatch) — 可指定镜像 tag
-#   2. 推送 tag (v*) — 自动使用 tag 作为镜像版本
-#   3. 推送到 main 分支时，仅当前端或后端代码文件变动才触发
-#
-# 前端文件路径: frontend/**
-# 后端文件路径: server/**
+#   2. 推送 tag (v*) — 自动全量构建并推送 v* 与 latest 镜像
+#   3. 推送到 main 分支时，根据代码变更按需触发
 #
 # 产出：
+#   - sgccr.ccs.tencentyun.com/frp-all-in-one/frps:<tag>
 #   - sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:<tag>
 #   - sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:<tag>
+#   - sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:<tag>
 #
 # 所需 GitHub Secrets:
-#   TCR_USERNAME  — 腾讯云 TCR 访问凭证用户名（控制台 → 容器镜像服务 → 访问凭证）
+#   TCR_USERNAME  — 腾讯云 TCR 访问凭证用户名
 #   TCR_PASSWORD  — 腾讯云 TCR 访问凭证密码
 # ============================================================
 
@@ -24,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '镜像标签 (如 v1.0.0 或 latest)'
+        description: '镜像标签 (如 v3.0.0 或 latest)'
         required: false
         default: 'latest'
 
@@ -32,10 +31,11 @@ on:
     branches:
       - main
     paths:
-      # 后端文件
       - 'server/**'
-      # 前端文件
       - 'frontend/**'
+      - 'agent/**'
+      - 'core/**'
+      - 'deploy/**'
     tags:
       - 'v*'
 
@@ -44,6 +44,8 @@ env:
   NAMESPACE: frp-all-in-one
   BACKEND_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend
   FRONTEND_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend
+  FRPS_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frps
+  AGENT_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent
 
 jobs:
   # ===========================
@@ -55,6 +57,8 @@ jobs:
     outputs:
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
+      frps: ${{ steps.changes.outputs.frps }}
+      agent: ${{ steps.changes.outputs.agent }}
       tag: ${{ steps.tag.outputs.TAG }}
     steps:
       - name: Checkout code
@@ -65,17 +69,21 @@ jobs:
       - name: Detect file changes
         id: changes
         run: |
-          # workflow_dispatch / tag 推送：两个都构建
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref_type }}" = "tag" ]; then
+          # workflow_dispatch / tag 推送：全量构建所有 4 个镜像
+          event="${{ github.event_name }}"
+          ref_type="${{ github.ref_type }}"
+          if [ "$event" = "workflow_dispatch" ] || [ "$ref_type" = "tag" ]; then
             echo "backend=true" >> $GITHUB_OUTPUT
             echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "frps=true" >> $GITHUB_OUTPUT
+            echo "agent=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # paths 过滤器已保证只有 server/frontend 的文件变动才会触发
-          # 直接用 git diff 比较最近两次提交来判断哪个目录有变更
           BACKEND_CHANGED="false"
           FRONTEND_CHANGED="false"
+          FRPS_CHANGED="false"
+          AGENT_CHANGED="false"
 
           for file in $(git diff --name-only HEAD~1 HEAD 2>/dev/null); do
             case "$file" in
@@ -83,12 +91,20 @@ jobs:
                 BACKEND_CHANGED="true" ;;
               frontend/*)
                 FRONTEND_CHANGED="true" ;;
+              core/*|deploy/frps.Dockerfile)
+                FRPS_CHANGED="true"
+                AGENT_CHANGED="true" ;;
+              agent/*)
+                AGENT_CHANGED="true" ;;
             esac
           done
 
           echo "backend=${BACKEND_CHANGED}" >> $GITHUB_OUTPUT
           echo "frontend=${FRONTEND_CHANGED}" >> $GITHUB_OUTPUT
-          echo ">> Changes — backend: ${BACKEND_CHANGED}, frontend: ${FRONTEND_CHANGED}"
+          echo "frps=${FRPS_CHANGED}" >> $GITHUB_OUTPUT
+          echo "agent=${AGENT_CHANGED}" >> $GITHUB_OUTPUT
+          echo ">> Changes: b=${BACKEND_CHANGED}, f=${FRONTEND_CHANGED}"
+          echo ">> Changes: s=${FRPS_CHANGED}, a=${AGENT_CHANGED}"
 
       - name: Determine tag
         id: tag
@@ -102,6 +118,40 @@ jobs:
           fi
           echo "TAG=${TAG}" >> $GITHUB_OUTPUT
           echo ">> Image tag: ${TAG}"
+
+  # ===========================
+  # 构建并推送定制版 FRPS 镜像
+  # ===========================
+  build-frps:
+    name: Build FRPS Image
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frps == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Tencent TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Build and push FRPS
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/frps.Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRPS_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
+            ${{ env.FRPS_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ===========================
   # 构建并推送后端镜像
@@ -168,5 +218,39 @@ jobs:
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
             ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================
+  # 构建并推送客户端 Agent 镜像
+  # ===========================
+  build-agent:
+    name: Build Agent Image
+    needs: detect-changes
+    if: needs.detect-changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Tencent TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Build and push Agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: agent/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AGENT_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
+            ${{ env.AGENT_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

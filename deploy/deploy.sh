@@ -1,6 +1,6 @@
-#!/bin/sh
-# FRP-All in one - Podman 一键部署脚本
-# 用途: 自动识别 Linux 发行版并完成 Podman 部署
+#!/bin/bash
+# FRP-ALL-IN-ONE - 极速容器一键部署脚本 (腾讯云公开镜像服务)
+# 用途: 自动识别 Linux 发行版并拉取全套专属镜像完成极速部署
 
 set -eu
 
@@ -13,12 +13,13 @@ NC='\033[0m'
 
 COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
 COMPOSE_MODE=""
+CONTAINER_CLI="podman"
 LOW_MEM_NO_SWAP="0"
 PROJECT_CONTAINERS="frp-manager-backend frp-manager-web frps"
 
-echo "=========================================="
-echo "  FRP-All in one - Podman 一键部署脚本"
-echo "=========================================="
+echo "========================================================"
+echo "  FRP-ALL-IN-ONE - 一键部署 (腾讯云镜像服务)"
+echo "========================================================"
 echo ""
 
 require_root() {
@@ -142,32 +143,88 @@ check_podman_version() {
     fi
 }
 
-detect_compose_mode() {
-    if podman compose version >/dev/null 2>&1; then
-        COMPOSE_MODE="podman"
-        echo -e "${GREEN}[OK] 使用 compose 实现: podman compose${NC}"
-        return
+detect_container_stack() {
+    echo ""
+    echo "[CHECK] 检测容器运行时环境 (Docker / Podman)..."
+
+    # 1. 优先检测 Docker 环境
+    if command -v docker >/dev/null 2>&1; then
+        if docker compose version >/dev/null 2>&1; then
+            CONTAINER_CLI="docker"
+            COMPOSE_MODE="docker-compose-plugin"
+            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Docker + docker compose${NC}"
+            return
+        elif command -v docker-compose >/dev/null 2>&1; then
+            CONTAINER_CLI="docker"
+            COMPOSE_MODE="docker-compose"
+            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Docker + docker-compose${NC}"
+            return
+        fi
     fi
 
-    if command -v podman-compose >/dev/null 2>&1; then
-        COMPOSE_MODE="podman-compose"
-        echo -e "${GREEN}[OK] 使用 compose 实现: podman-compose${NC}"
-        return
+    # 2. 其次检测已存在的 Podman 环境
+    if command -v podman >/dev/null 2>&1; then
+        if podman compose version >/dev/null 2>&1; then
+            CONTAINER_CLI="podman"
+            COMPOSE_MODE="podman"
+            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Podman + podman compose${NC}"
+            check_podman_version
+            return
+        elif command -v podman-compose >/dev/null 2>&1; then
+            CONTAINER_CLI="podman"
+            COMPOSE_MODE="podman-compose"
+            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Podman + podman-compose${NC}"
+            check_podman_version
+            return
+        fi
     fi
 
-    echo -e "${RED}[ERROR] 未检测到可用的 compose 实现${NC}"
-    exit 1
+    # 3. 若均未就绪，自动安装 Podman 栈
+    CONTAINER_CLI="podman"
+    install_podman_stack
+    check_podman_version
+    detect_compose_mode
 }
 
 run_compose() {
-    if [ "$COMPOSE_MODE" = "podman" ]; then
-        podman compose -f "$COMPOSE_FILE" "$@"
-    else
-        podman-compose -f "$COMPOSE_FILE" "$@"
-    fi
+    case "$COMPOSE_MODE" in
+        "docker-compose-plugin")
+            docker compose -f "$COMPOSE_FILE" "$@"
+            ;;
+        "docker-compose")
+            docker-compose -f "$COMPOSE_FILE" "$@"
+            ;;
+        "podman")
+            podman compose -f "$COMPOSE_FILE" "$@"
+            ;;
+        "podman-compose")
+            podman-compose -f "$COMPOSE_FILE" "$@"
+            ;;
+        *)
+            echo -e "${RED}[ERROR] 未识别的 compose 模式: $COMPOSE_MODE${NC}"
+            exit 1
+            ;;
+    esac
 }
 
-ensure_podman_socket() {
+ensure_container_socket() {
+    if [ "$CONTAINER_CLI" = "docker" ]; then
+        if [ -S /var/run/docker.sock ]; then
+            echo -e "${GREEN}[OK] Docker Socket 已就绪${NC}"
+            return
+        fi
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl enable --now docker || true
+            sleep 1
+        fi
+        if [ -S /var/run/docker.sock ]; then
+            echo -e "${GREEN}[OK] Docker Socket 可用${NC}"
+            return
+        fi
+        echo -e "${YELLOW}[WARN] 未检测到 /var/run/docker.sock，若使用非 Rootless Docker 请检查服务状态${NC}"
+        return
+    fi
+
     echo "[CHECK] 启用 Podman Socket..."
 
     mkdir -p /run/podman
@@ -255,9 +312,9 @@ cleanup_existing_project_containers() {
 
     removed_any="0"
     for container_name in $PROJECT_CONTAINERS; do
-        if podman container exists "$container_name" >/dev/null 2>&1; then
+        if $CONTAINER_CLI inspect "$container_name" >/dev/null 2>&1; then
             echo -e "${YELLOW}[WARN] 发现旧容器: ${container_name}，正在移除...${NC}"
-            podman rm -f "$container_name" >/dev/null 2>&1 || true
+            $CONTAINER_CLI rm -f "$container_name" >/dev/null 2>&1 || true
             removed_any="1"
         fi
     done
@@ -298,12 +355,13 @@ deploy_services() {
     fi
 
     echo "[PULL] 拉取最新镜像..."
-    if ! run_compose pull backend frontend; then
+    if ! run_compose pull backend frontend frps; then
         echo -e "${YELLOW}[WARN] 镜像拉取失败，检查本地缓存...${NC}"
         has_local="1"
         for img in sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
-                    sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest; do
-            if ! podman image exists "$img" 2>/dev/null; then
+                    sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+                    sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest; do
+            if ! $CONTAINER_CLI image inspect "$img" >/dev/null 2>&1; then
                 has_local="0"
                 echo -e "${RED}[ERROR] 本地无缓存镜像: $img${NC}"
             fi
@@ -322,9 +380,9 @@ deploy_services() {
     sleep 3
     all_ok="1"
     for name in frp-manager-backend frp-manager-web frps; do
-        if ! podman ps --filter "name=^${name}$" --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
+        if ! $CONTAINER_CLI ps --filter "name=^${name}$" --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
             echo -e "${RED}[ERROR] 容器 ${name} 未正常运行${NC}"
-            podman logs "$name" --tail 10 2>/dev/null || true
+            $CONTAINER_CLI logs "$name" --tail 10 2>/dev/null || true
             echo ""
             all_ok="0"
         else
@@ -374,15 +432,28 @@ show_info() {
     echo -e "   ${YELLOW}* 首个登录的用户将自动成为管理员${NC}"
     echo ""
     echo "[常用命令]"
-    if [ "$COMPOSE_MODE" = "podman" ]; then
-        echo "   查看日志: podman compose -f compose.yml logs -f"
-        echo "   重启服务: podman compose -f compose.yml restart"
-        echo "   停止服务: podman compose -f compose.yml down"
-    else
-        echo "   查看日志: podman-compose -f compose.yml logs -f"
-        echo "   重启服务: podman-compose -f compose.yml restart"
-        echo "   停止服务: podman-compose -f compose.yml down"
-    fi
+    case "$COMPOSE_MODE" in
+        "docker-compose-plugin")
+            echo "   查看日志: docker compose -f compose.yml logs -f"
+            echo "   重启服务: docker compose -f compose.yml restart"
+            echo "   停止服务: docker compose -f compose.yml down"
+            ;;
+        "docker-compose")
+            echo "   查看日志: docker-compose -f compose.yml logs -f"
+            echo "   重启服务: docker-compose -f compose.yml restart"
+            echo "   停止服务: docker-compose -f compose.yml down"
+            ;;
+        "podman")
+            echo "   查看日志: podman compose -f compose.yml logs -f"
+            echo "   重启服务: podman compose -f compose.yml restart"
+            echo "   停止服务: podman compose -f compose.yml down"
+            ;;
+        *)
+            echo "   查看日志: podman-compose -f compose.yml logs -f"
+            echo "   重启服务: podman-compose -f compose.yml restart"
+            echo "   停止服务: podman-compose -f compose.yml down"
+            ;;
+    esac
     echo ""
 }
 
@@ -438,6 +509,20 @@ configure_env_vars() {
         _save_to_system_env "GITHUB_CLIENT_SECRET" "$GITHUB_CLIENT_SECRET"
     fi
 
+    # ---- INITIAL_ADMIN_GITHUB_USERNAME (防首登抢占) ----
+    if [ -z "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
+        echo ""
+        echo -e "${YELLOW}[安全加固] 初始管理员限制（防公网抢注）：${NC}"
+        echo "  建议指定你的 GitHub 用户名。指定后，只有该账号能激活为唯一超级管理员。"
+        if [ -t 0 ]; then
+            printf "请输入管理员 GitHub 用户名（建议填写，直接回车跳过）: "
+            read -r INITIAL_ADMIN_GITHUB_USERNAME
+        fi
+        if [ -n "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
+            _save_to_system_env "INITIAL_ADMIN_GITHUB_USERNAME" "$INITIAL_ADMIN_GITHUB_USERNAME"
+        fi
+    fi
+
     # ---- SECRET_KEY ----
     # 每次部署重新生成，使旧 JWT 令牌立即失效
     SECRET_KEY=$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=' | head -c 64)
@@ -452,6 +537,7 @@ configure_env_vars() {
 GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
 GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
 SECRET_KEY=${SECRET_KEY}
+INITIAL_ADMIN_GITHUB_USERNAME=${INITIAL_ADMIN_GITHUB_USERNAME:-}
 ENVEOF
     chmod 600 "$ENV_FILE"
 
@@ -459,6 +545,7 @@ ENVEOF
     export GITHUB_CLIENT_ID
     export GITHUB_CLIENT_SECRET
     export SECRET_KEY
+    export INITIAL_ADMIN_GITHUB_USERNAME
 
     echo ""
     echo -e "${GREEN}[OK] 环境变量已保存到 .env 文件${NC}"
@@ -482,16 +569,43 @@ _save_to_system_env() {
     fi
 }
 
+ensure_frps_config() {
+    local frps_file="$SCRIPT_DIR/frps.toml"
+    local init_token
+    init_token=$(head -c 24 /dev/urandom | base64 | tr -d '\n/+=' | head -c 32)
+
+    if [ ! -f "$frps_file" ]; then
+        cat > "$frps_file" <<FRPEOF
+bindPort = 7000
+auth.token = "${init_token}"
+
+# 此文件由系统自动生成
+# 请通过 Web 界面配置 FRPS，不要手动编辑
+FRPEOF
+        chmod 600 "$frps_file"
+        echo -e "${GREEN}[OK] 已初始化安全默认 frps.toml 配置（权限 0600）${NC}"
+    elif ! grep -q "auth.token" "$frps_file" || grep -q "init_token_placeholder" "$frps_file"; then
+        if grep -q "init_token_placeholder" "$frps_file"; then
+            sed -i "s|init_token_placeholder|${init_token}|g" "$frps_file"
+        else
+            echo "auth.token = \"${init_token}\"" >> "$frps_file"
+        fi
+        chmod 600 "$frps_file"
+        echo -e "${GREEN}[OK] 已为 frps.toml 配置安全随机 auth.token（权限 0600）${NC}"
+    else
+        chmod 600 "$frps_file" 2>/dev/null || true
+    fi
+}
+
 main() {
     require_root
     detect_os
-    install_podman_stack
-    check_podman_version
-    detect_compose_mode
-    ensure_podman_socket
+    detect_container_stack
+    ensure_container_socket
     check_memory
     cleanup_existing_project_containers
     check_ports
+    ensure_frps_config
     configure_env_vars
     deploy_services
     show_info

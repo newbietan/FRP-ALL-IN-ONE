@@ -6,3 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+__pycache__/
+*.pyc
+.venv/
+pyrightconfig.json
+data/
+server/bin/
+core/frp_custom/assets/
+
+

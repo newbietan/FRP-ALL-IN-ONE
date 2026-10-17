@@ -19,18 +19,21 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '发布版本号 (如 v1.0.0)'
+        description: '发布版本号 (如 v3.0.0)'
         required: true
-        default: 'v1.0.0'
+        default: 'v3.0.0'
 
   push:
     branches:
       - main
     paths:
       - 'agent/**'
+      - 'core/**'
+    tags:
+      - 'v*'
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.24'
 
 jobs:
   resolve-version:
@@ -49,6 +52,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${{ github.ref_name }}"
           else
             VERSION="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
           fi
@@ -79,17 +84,27 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=${{ needs.resolve-version.outputs.VERSION }}
-          BUILD_TIME=$(date +%Y-%m-%d_%H:%M:%S)
-          LDFLAGS="-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}"
+          BT=$(date +%Y-%m-%d_%H:%M:%S)
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.buildTime=${BT}"
           mkdir -p dist
 
-          for TARGET in "linux amd64" "linux arm64" "darwin amd64" "darwin arm64" "windows amd64"; do
+          TARGETS=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+          for TARGET in "${TARGETS[@]}"; do
             set -- $TARGET
             OS=$1; ARCH=$2
             EXT=""; [ "$OS" = "windows" ] && EXT=".exe"
             OUT="dist/frp-agent-${OS}-${ARCH}${EXT}"
             echo "Building ${OS}-${ARCH}..."
-            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$OUT" ./cmd/frp-agent
+            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build \
+              -trimpath -buildvcs=false \
+              -ldflags "$LDFLAGS" \
+              -o "$OUT" ./cmd/frp-agent
           done
 
           ls -la dist/
@@ -118,7 +133,7 @@ jobs:
         run: set -euo pipefail && cd dist && sha256sum frp-agent-* > SHA256SUMS
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-version.outputs.VERSION }}
           target_commitish: ${{ github.sha }}

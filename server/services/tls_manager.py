@@ -2,12 +2,20 @@
 TLS 证书管理服务
 处理 Let's Encrypt 证书申请、续期、Nginx 配置管理
 """
-import os
-import subprocess
+from __future__ import annotations
+
+import contextlib
 from datetime import datetime, timezone
-from typing import Optional
+import logging
+import os
 from pathlib import Path
+import shutil
+import subprocess
+from typing import Any
+
 from core.container_engine import run_podman
+
+logger = logging.getLogger(__name__)
 
 # 证书存储路径
 CERTS_DIR = Path(os.environ.get("FRP_CERTS_DIR", "/app/certs"))
@@ -20,50 +28,49 @@ ACME_SH = "/opt/acme.sh/acme.sh"
 
 class TLSManager:
     """TLS 证书管理器"""
-    
+
     def __init__(self):
         AUTO_CERTS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    def get_cert_info(self, domain: str) -> Optional[dict]:
+
+    def get_cert_info(self, domain: str) -> dict[str, Any] | None:
         """获取证书信息"""
         cert_path = AUTO_CERTS_DIR / f"{domain}.crt"
 
         if not cert_path.exists():
             return None
-        
+
         # 使用 openssl 获取证书过期时间
         try:
             result = subprocess.run(
                 ["openssl", "x509", "-in", str(cert_path), "-noout", "-dates", "-subject"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                check=False,
             )
             if result.returncode == 0:
-                info = {"domain": domain, "cert_path": str(cert_path)}
+                info: dict[str, Any] = {"domain": domain, "cert_path": str(cert_path)}
                 for line in result.stdout.split("\n"):
                     if "notAfter=" in line:
                         expiry_str = line.split("=")[1]
                         # 解析日期
-                        try:
+                        with contextlib.suppress(Exception):
                             expiry = datetime.strptime(expiry_str, "%b %d %H:%M:%S %Y %Z")
                             # openssl 输出的时间总是 GMT，强制设为 UTC 避免 naive/aware 混用
                             expiry_utc = expiry.replace(tzinfo=timezone.utc)
                             info["expires_at"] = expiry_utc.isoformat()
                             info["days_until_expiry"] = (expiry_utc - datetime.now(timezone.utc)).days
-                        except:
-                            pass
                     if "subject=" in line:
                         info["subject"] = line
                 return info
-        except:
-            pass
+        except Exception as e:
+            logger.debug("解析证书 %s 异常: %s", domain, e)
         return None
-    
-    def issue_cert(self, domain: str) -> dict:
+
+    def issue_cert(self, domain: str) -> dict[str, Any]:
         """
         使用 acme.sh 申请 Let's Encrypt 证书
-        
+
         Returns:
             {"success": bool, "message": str, "cert_path": str or None}
         """
@@ -71,7 +78,7 @@ class TLSManager:
             # 设置环境变量
             env = os.environ.copy()
             env["LE_WORKING_DIR"] = "/opt/acme.sh"
-            
+
             # 申请证书（使用独立模式，不依赖 Nginx 配置）
             cmd = [
                 ACME_SH,
@@ -82,20 +89,21 @@ class TLSManager:
                 "--certhome", str(AUTO_CERTS_DIR),
                 "--force"
             ]
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
-                env=env
+                env=env,
+                check=False,
             )
-            
+
             if result.returncode == 0:
                 # 安装证书到标准位置
                 cert_path = AUTO_CERTS_DIR / f"{domain}.crt"
                 key_path = AUTO_CERTS_DIR / f"{domain}.key"
-                
+
                 install_cmd = [
                     ACME_SH,
                     "--install-cert",
@@ -105,18 +113,18 @@ class TLSManager:
                     "--key-file", str(key_path),
                     "--fullchain-file", str(AUTO_CERTS_DIR / f"{domain}.fullchain.crt")
                 ]
-                
+
                 install_result = subprocess.run(
-                    install_cmd, capture_output=True, text=True, env=env
+                    install_cmd, capture_output=True, text=True, env=env, check=False,
                 )
-                
+
                 if install_result.returncode != 0:
                     return {
                         "success": False,
                         "message": f"证书申请成功但安装失败：{install_result.stderr[:200]}",
                         "cert_path": None
                     }
-                
+
                 return {
                     "success": True,
                     "message": f"证书申请成功：{domain}",
@@ -153,16 +161,16 @@ class TLSManager:
         except Exception as e:
             return {
                 "success": False,
-                "message": f"证书申请异常：{str(e)}",
+                "message": f"证书申请异常：{e!s}",
                 "cert_path": None
             }
-    
-    def renew_cert(self, domain: str) -> dict:
+
+    def renew_cert(self, domain: str) -> dict[str, Any]:
         """续期证书"""
         try:
             env = os.environ.copy()
             env["LE_WORKING_DIR"] = "/opt/acme.sh"
-            
+
             cmd = [
                 ACME_SH,
                 "--renew",
@@ -170,15 +178,16 @@ class TLSManager:
                 "--certhome", str(AUTO_CERTS_DIR),
                 "--force"
             ]
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
-                env=env
+                env=env,
+                check=False,
             )
-            
+
             if result.returncode == 0:
                 return {
                     "success": True,
@@ -192,9 +201,9 @@ class TLSManager:
         except Exception as e:
             return {
                 "success": False,
-                "message": f"证书续期异常：{str(e)}"
+                "message": f"证书续期异常：{e!s}"
             }
-    
+
     def generate_nginx_config(
         self,
         domain: str,
@@ -232,8 +241,17 @@ server {{
     ssl_certificate {cert_path};
     ssl_certificate_key {key_path};
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # 安全响应头
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
     location /assets/ {{
         root /usr/share/nginx/html;
@@ -358,28 +376,81 @@ server {{
 }}
 '''
         return config
-    
-    def reload_nginx(self) -> dict:
-        """重载 Nginx 配置"""
+
+    def apply_nginx_config(self, config_content: str, config_name: str = "default.conf") -> dict[str, Any]:
+        """应用 Nginx 配置：优先直接写入共享卷（避免依赖 podman cp），回退使用 podman cp"""
+        target_dir = Path("/etc/nginx/conf.d")
+        target_file = target_dir / config_name
+        try:
+            if target_dir.exists() and os.access(str(target_dir), os.W_OK):
+                target_file.write_text(config_content)
+                return {"success": True, "message": "Nginx 配置已写入共享数据卷"}
+        except Exception as e:
+            print(f"[TLSManager] 写入共享卷失败，回退使用 podman cp: {e}")
+
+        # 回退至通过本地 certs 目录复制
+        local_path = Path("/app/certs") / config_name
+        try:
+            local_path.write_text(config_content)
+            cp_result = run_podman(
+                ["cp", str(local_path), f"frp-manager-web:/etc/nginx/conf.d/{config_name}"],
+                timeout=30,
+            )
+            if cp_result.returncode == 0:
+                return {"success": True, "message": "Nginx 配置已通过 podman cp 同步"}
+            return {"success": False, "message": f"复制 Nginx 配置失败: {cp_result.stderr}"}
+        except Exception as e:
+            return {"success": False, "message": f"部署 Nginx 配置失败: {e}"}
+
+    def reload_nginx(self) -> dict[str, Any]:
+        """重载 Nginx 配置（原生模式优先，容器模式回退）"""
+        # 1. 优先尝试原生主机 Nginx
+        if shutil.which("nginx"):
+            try:
+                test_result = subprocess.run(
+                    ["nginx", "-t"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                if test_result.returncode != 0:
+                    return {
+                        "success": False,
+                        "message": f"Nginx 配置测试失败：{test_result.stderr}",
+                    }
+                reload_result = subprocess.run(
+                    ["nginx", "-s", "reload"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                if reload_result.returncode == 0:
+                    return {"success": True, "message": "Nginx 配置重载成功 (原生系统服务)"}
+            except Exception as e:
+                logger.debug("原生 Nginx 重载尝试失败: %s", e)
+
+        # 2. 容器模式回退
         try:
             # 先测试配置
             test_result = run_podman(
                 ["exec", "frp-manager-web", "nginx", "-t"],
-                timeout=30
+                timeout=30,
             )
-            
+
             if test_result.returncode != 0:
                 return {
                     "success": False,
                     "message": f"Nginx 配置测试失败：{test_result.stderr}"
                 }
-            
+
             # 重载配置
             reload_result = run_podman(
                 ["exec", "frp-manager-web", "nginx", "-s", "reload"],
-                timeout=30
+                timeout=30,
             )
-            
+
             if reload_result.returncode == 0:
                 return {
                     "success": True,
@@ -393,9 +464,9 @@ server {{
         except Exception as e:
             return {
                 "success": False,
-                "message": f"重载 Nginx 异常：{str(e)}"
+                "message": f"重载 Nginx 异常：{e!s}"
             }
-    
+
     def check_cert_needs_renew(self, domain: str, days_before: int = 30) -> bool:
         """检查证书是否需要续期"""
         info = self.get_cert_info(domain)

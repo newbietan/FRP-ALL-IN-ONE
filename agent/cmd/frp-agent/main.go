@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	version   = "1.0.0"
+	version   = "3.0.0"
 	buildTime = "unknown"
 )
 
@@ -57,7 +57,7 @@ func main() {
 	serverURL := flag.String("server", "", "服务端 WebSocket 地址 (必填)")
 	clientID := flag.String("id", "", "客户端 ID (必填)")
 	token := flag.String("token", "", "认证 Token (必填)")
-	frpcPath := flag.String("frpc", "/opt/frp/frpc", "frpc 二进制路径")
+	frpcPath := flag.String("frpc", "", "已废弃：内核已内置，无需外部 frpc 路径")
 	configPath := flag.String("config", "/opt/frp/frpc.toml", "frpc 配置文件路径")
 	logPath := flag.String("log", "/opt/frp/logs", "日志存储目录")
 	showVersion := flag.Bool("version", false, "显示版本信息")
@@ -69,9 +69,14 @@ func main() {
 		os.Exit(0)
 	}
 
+	effectiveToken := *token
+	if effectiveToken == "" {
+		effectiveToken = os.Getenv("FRP_AGENT_TOKEN")
+	}
+
 	// 验证必填参数
-	if *serverURL == "" || *clientID == "" || *token == "" {
-		fmt.Println("错误: server, id, token 参数为必填项")
+	if *serverURL == "" || *clientID == "" || effectiveToken == "" {
+		fmt.Println("错误: server, id, token (或环境变量 FRP_AGENT_TOKEN) 参数为必填项")
 		fmt.Println()
 		flag.Usage()
 		os.Exit(1)
@@ -85,7 +90,7 @@ func main() {
 	cfg := &config.Config{
 		ServerURL:  *serverURL,
 		ClientID:   *clientID,
-		Token:      *token,
+		Token:      effectiveToken,
 		FRPCPath:   *frpcPath,
 		ConfigPath: *configPath,
 		LogPath:    *logPath,
@@ -99,7 +104,7 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stdout, logBridge)) // 既输出到控制台，也输出到 Collector
 
 	sysMonitor := monitor.NewMonitor()
-	frpcManager := frpc.NewManager(cfg.FRPCPath, cfg.ConfigPath, logCollector)
+	frpcManager := frpc.NewManager(cfg.ConfigPath, logCollector)
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.ClientID, cfg.Token, version)
 
 	// 设置 WebSocket 消息处理器

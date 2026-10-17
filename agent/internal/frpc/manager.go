@@ -1,100 +1,117 @@
-// Package frpc 提供 FRPC 进程托管功能
+// Package frpc 提供内置嵌入式 FRP 客户端核心引擎（无子进程，单二进制化）
 package frpc
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"io"
 	"log"
-	"net"
-	"net/http"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
 
+	"github.com/fatedier/frp/client"
+	"github.com/fatedier/frp/pkg/config"
+	"github.com/fatedier/frp/pkg/config/source"
+	"github.com/fatedier/frp/pkg/config/v1/validation"
+	"github.com/fatedier/frp/pkg/policy/security"
 	"github.com/frp-manager/agent/internal/logger"
 )
 
-// Manager FRPC 进程管理器
+// Manager 内置 FRP 客户端服务管理器
 type Manager struct {
-	frpcPath     string
 	configPath   string
 	logCollector *logger.Collector
 
-	process *exec.Cmd
-	doneCh  chan struct{}
-	stdout  io.ReadCloser
-	stderr  io.ReadCloser
+	service *client.Service
+	ctx     context.Context
+	cancel  context.CancelFunc
 	mu      sync.Mutex
 
 	isRunning bool
 	OnStatus  func(status string)
 }
 
-// NewManager 创建新的 FRPC 管理器
-func NewManager(frpcPath, configPath string, logCollector *logger.Collector) *Manager {
+// NewManager 创建新的内置 FRP 管理器（无需外部 frpc 可执行文件路径）
+func NewManager(configPath string, logCollector *logger.Collector) *Manager {
 	return &Manager{
-		frpcPath:     frpcPath,
 		configPath:   configPath,
 		logCollector: logCollector,
 	}
 }
 
-// Start 启动 FRPC 进程
+// Start 在当前进程内启动 FRP 客户端服务
 func (m *Manager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.isRunning {
-		return fmt.Errorf("FRPC 已在运行中")
+		return fmt.Errorf("FRP 内核服务已在运行中")
 	}
 
-	// 检查 frpc 二进制是否存在
-	if _, err := os.Stat(m.frpcPath); os.IsNotExist(err) {
-		return fmt.Errorf("frpc 二进制不存在: %s", m.frpcPath)
-	}
-
-	// 检查配置文件是否存在
 	if _, err := os.Stat(m.configPath); os.IsNotExist(err) {
 		return fmt.Errorf("配置文件不存在: %s", m.configPath)
 	}
 
-	log.Printf("[FRPC] 启动中: %s -c %s", m.frpcPath, m.configPath)
+	log.Printf("[FRP-Core] 正在通过内置内核加载配置: %s", m.configPath)
 
-	// 创建进程
-	m.process = exec.Command(m.frpcPath, "-c", m.configPath)
-
-	// 获取输出管道
-	stdout, err := m.process.StdoutPipe()
+	result, err := config.LoadClientConfigResult(m.configPath, false)
 	if err != nil {
-		return fmt.Errorf("获取 stdout 失败: %v", err)
+		return fmt.Errorf("加载配置失败: %w", err)
 	}
-	m.stdout = stdout
 
-	stderr, err := m.process.StderrPipe()
+	configSource := source.NewConfigSource()
+	if err := configSource.ReplaceAll(result.Proxies, result.Visitors); err != nil {
+		return fmt.Errorf("设置配置源失败: %w", err)
+	}
+
+	aggregator := source.NewAggregator(configSource)
+	proxyCfgs, visitorCfgs, err := aggregator.Load()
 	if err != nil {
-		return fmt.Errorf("获取 stderr 失败: %v", err)
-	}
-	m.stderr = stderr
-
-	// 启动进程
-	if err := m.process.Start(); err != nil {
-		return fmt.Errorf("启动进程失败: %v", err)
+		return fmt.Errorf("加载聚合代理配置失败: %w", err)
 	}
 
+	proxyCfgs, visitorCfgs = config.FilterClientConfigurers(result.Common, proxyCfgs, visitorCfgs)
+	proxyCfgs = config.CompleteProxyConfigurers(proxyCfgs)
+	visitorCfgs = config.CompleteVisitorConfigurers(visitorCfgs)
+
+	unsafeFeatures := security.NewUnsafeFeatures([]string{})
+	_, err = validation.ValidateAllClientConfig(result.Common, proxyCfgs, visitorCfgs, unsafeFeatures)
+	if err != nil {
+		return fmt.Errorf("校验配置失败: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx = ctx
+	m.cancel = cancel
+
+	svr, err := client.NewService(client.ServiceOptions{
+		Common:                 result.Common,
+		ConfigSourceAggregator: aggregator,
+		UnsafeFeatures:         unsafeFeatures,
+		ConfigFilePath:         m.configPath,
+	})
+	if err != nil {
+		cancel()
+		return fmt.Errorf("创建 FRP 客户端服务失败: %w", err)
+	}
+
+	m.service = svr
 	m.isRunning = true
-	log.Printf("[FRPC] 进程已启动, PID: %d", m.process.Process.Pid)
 
-	// 启动日志采集协程
-	go m.streamLogs(stdout, "stdout")
-	go m.streamLogs(stderr, "stderr")
+	log.Println("[FRP-Core] 内置穿透引擎已启动")
 
-	// 创建 done channel 用于通知进程退出
-	m.doneCh = make(chan struct{})
-
-	// 监控进程状态
-	go m.watchProcess()
+	go func() {
+		if err := svr.Run(ctx); err != nil {
+			log.Printf("[FRP-Core] 运行终止: %v", err)
+		}
+		m.mu.Lock()
+		m.isRunning = false
+		m.service = nil
+		m.mu.Unlock()
+		if m.OnStatus != nil {
+			m.OnStatus("stopped")
+		}
+	}()
 
 	if m.OnStatus != nil {
 		m.OnStatus("running")
@@ -103,47 +120,23 @@ func (m *Manager) Start() error {
 	return nil
 }
 
-// Stop 停止 FRPC 进程
+// Stop 停止 FRP 客户端服务
 func (m *Manager) Stop() error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if !m.isRunning || m.process == nil {
-		m.mu.Unlock()
+	if !m.isRunning || m.service == nil {
 		return nil
 	}
 
-	log.Println("[FRPC] 正在停止...")
-
-	// 发送终止信号
-	if err := m.process.Process.Signal(os.Interrupt); err != nil {
-		m.process.Process.Kill()
+	log.Println("[FRP-Core] 正在停止内置穿透引擎...")
+	m.service.GracefulClose(1 * time.Second)
+	if m.cancel != nil {
+		m.cancel()
 	}
 
-	proc := m.process
-	m.mu.Unlock()
-
-	// 在锁外等待进程退出，避免死锁（watchProcess 也需要锁）
-	select {
-	case <-m.doneCh:
-		log.Printf("[FRPC] 进程已停止")
-	case <-time.After(3 * time.Second):
-		log.Println("[FRPC] 等待超时，强制杀死进程")
-		proc.Process.Kill()
-		select {
-		case <-m.doneCh:
-			log.Printf("[FRPC] 进程已停止 (Killed)")
-		case <-time.After(1 * time.Second):
-			log.Println("[FRPC] 进程停止超时，不再等待")
-		}
-	}
-
-	m.mu.Lock()
-	m.process = nil
 	m.isRunning = false
-	m.mu.Unlock()
-
-	// 等待端口释放
-	time.Sleep(500 * time.Millisecond)
+	m.service = nil
 
 	if m.OnStatus != nil {
 		m.OnStatus("stopped")
@@ -152,172 +145,36 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-// Restart 重启 FRPC 进程
+// Restart 重启内置穿透服务
 func (m *Manager) Restart() error {
-	log.Println("[FRPC] 重启中...")
-
-	// 直接内联停止逻辑，避免 Stop→Lock 死锁
-	m.mu.Lock()
-	if m.isRunning && m.process != nil {
-		if err := m.process.Process.Signal(os.Interrupt); err != nil {
-			m.process.Process.Kill()
-		}
-		proc := m.process
-		m.mu.Unlock()
-
-		select {
-		case <-m.doneCh:
-		case <-time.After(3 * time.Second):
-			proc.Process.Kill()
-			select {
-			case <-m.doneCh:
-			case <-time.After(1 * time.Second):
-			}
-		}
-
-		m.mu.Lock()
-		m.process = nil
-		m.isRunning = false
-		m.mu.Unlock()
-
-		time.Sleep(500 * time.Millisecond)
-		if m.OnStatus != nil {
-			m.OnStatus("stopped")
-		}
-	} else {
-		m.mu.Unlock()
-	}
-
-	time.Sleep(1 * time.Second)
+	log.Println("[FRP-Core] 正在重启内置穿透服务...")
+	_ = m.Stop()
+	time.Sleep(500 * time.Millisecond)
 	return m.Start()
 }
 
-// UpdateConfig 更新配置并重载
+// UpdateConfig 更新配置并热重载
 func (m *Manager) UpdateConfig(newConfig string) error {
-	log.Println("[FRPC] 正在更新配置...")
+	log.Println("[FRP-Core] 收到新配置，正在写入磁盘并热重载...")
 
 	// 备份旧配置
 	backupPath := m.configPath + ".bak"
 	if data, err := os.ReadFile(m.configPath); err == nil {
-		os.WriteFile(backupPath, data, 0644)
+		_ = os.WriteFile(backupPath, data, 0o600)
 	}
 
-	// 写入新配置
-	if err := os.WriteFile(m.configPath, []byte(newConfig), 0644); err != nil {
-		return fmt.Errorf("写入配置失败: %v", err)
+	// 写入新配置（权限 0600，杜绝信息泄露）
+	if err := os.WriteFile(m.configPath, []byte(newConfig), 0o600); err != nil {
+		return fmt.Errorf("写入配置失败: %w", err)
 	}
 
-	log.Println("[FRPC] 配置已更新，准备重载...")
-
-	// 尝试通过 Admin API 热重载
-	// 只有当进程在运行，且 Admin API 端口可达时，才进行热重载
-	if m.IsRunning() && m.checkAdminAPIAvailable() {
-		log.Println("[FRPC] Admin API 可用，尝试热重载...")
-		if err := m.hotReload(); err != nil {
-			log.Printf("[FRPC] 热重载失败: %v, 将回退到重启进程", err)
-			return m.Restart()
-		}
-		log.Println("[FRPC] 热重载成功")
-		return nil
-	}
-
-	// 其他情况（进程未运行，或 Admin API 不可用），直接重启/启动
-	log.Println("[FRPC] 进程未运行或 Admin API 不可用，执行重启...")
-	if m.IsRunning() {
-		return m.Restart()
-	}
-	return m.Start()
+	log.Println("[FRP-Core] 配置文件已更新，重启引擎生效...")
+	return m.Restart()
 }
 
-// checkAdminAPIAvailable 检查 Admin API 端口是否可达
-func (m *Manager) checkAdminAPIAvailable() bool {
-	timeout := 100 * time.Millisecond
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:7400", timeout)
-	if err != nil {
-		return false
-	}
-	if conn != nil {
-		conn.Close()
-		return true
-	}
-	return false
-}
-
-// hotReload 通过 Admin API 热重载配置
-func (m *Manager) hotReload() error {
-	// FRPC Admin API 默认监听 127.0.0.1:7400
-	client := &http.Client{
-		Timeout: 2 * time.Second,
-	}
-
-	// 尝试 PUT /api/v1/reload (新版 API)
-	req, _ := http.NewRequest("PUT", "http://127.0.0.1:7400/api/v1/reload", nil)
-	resp, err := client.Do(req)
-
-	if err == nil && resp.StatusCode == http.StatusOK {
-		resp.Body.Close()
-		return nil
-	}
-	if resp != nil {
-		resp.Body.Close()
-	}
-
-	// 尝试旧版 API /api/reload (兼容旧版 FRPC)
-	resp, err = client.Get("http://127.0.0.1:7400/api/reload")
-	if err != nil {
-		return fmt.Errorf("请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("热重载失败: %d, %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// IsRunning 检查 FRPC 是否在运行
+// IsRunning 检查内置引擎是否在运行
 func (m *Manager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.isRunning
-}
-
-// 流式读取日志
-func (m *Manager) streamLogs(reader io.Reader, source string) {
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := scanner.Text()
-		// 发送到日志采集器
-		if m.logCollector != nil {
-			m.logCollector.AddLine(line)
-		}
-	}
-}
-
-// 监控进程状态
-func (m *Manager) watchProcess() {
-	defer close(m.doneCh) // 通知 Stop 协程进程已退出
-
-	if m.process == nil {
-		return
-	}
-
-	err := m.process.Wait()
-
-	m.mu.Lock()
-	m.isRunning = false
-	m.mu.Unlock()
-
-	if err != nil {
-		// 如果是被 Signal Killed，也会返回 err
-		log.Printf("[FRPC] 进程退出: %v", err)
-	} else {
-		log.Println("[FRPC] 进程已退出")
-	}
-
-	if m.OnStatus != nil {
-		m.OnStatus("stopped")
-	}
 }
