@@ -342,7 +342,7 @@ cleanup_existing_project_containers() {
     done
 
     # 4. 彻底重置数据目录与历史文件，保证每次部署均完全幂等
-    rm -f "$SCRIPT_DIR/frps.toml"
+    rm -rf "$SCRIPT_DIR/frps.toml"
     rm -rf "$SCRIPT_DIR/data"
     mkdir -p "$SCRIPT_DIR/data"
 
@@ -598,11 +598,6 @@ _save_to_system_env() {
 ensure_frps_config() {
     mkdir -p "$SCRIPT_DIR/data"
     local frps_file="$SCRIPT_DIR/data/frps.toml"
-
-    # 兼容迁移：若根目录下存在旧版 frps.toml 则自动迁移至 data 目录
-    if [ -f "$SCRIPT_DIR/frps.toml" ] && [ ! -f "$frps_file" ]; then
-        mv "$SCRIPT_DIR/frps.toml" "$frps_file"
-    fi
 
     local init_token
     init_token=$(head -c 24 /dev/urandom | base64 | tr -d '\n/+=' | head -c 32)
