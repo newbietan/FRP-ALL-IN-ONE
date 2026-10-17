@@ -13,9 +13,9 @@
   </p>
   <p>
     <a href="#highlights">Highlights</a> ·
+    <a href="#demo">Demo</a> ·
     <a href="#architecture">Architecture</a> ·
     <a href="#quick-start-server">Server Deployment</a> ·
-    <a href="#quick-start-client">Client Deployment</a> ·
     <a href="#ports">Ports</a> ·
     <a href="#maintainer">Maintainers</a> ·
     <a href="#license">License</a>
@@ -31,15 +31,24 @@
 
 ## Demo
 
-<img src="demo1.png" alt="Demo 1" width="900" />
-<br/><br/>
-<img src="demo2.png" alt="Demo 2" width="900" />
-<br/><br/>
-<img src="demo3.png" alt="Demo 3" width="900" />
-<br/><br/>
-<img src="demo4.png" alt="Demo 4" width="900" />
-<br/><br/>
-<img src="demo5.png" alt="Demo 5" width="900" />
+<p align="center">
+  <img src="demo1.png" alt="Dashboard Preview" width="850" />
+</p>
+
+<details>
+  <summary><b>Click to expand full feature gallery screenshots</b></summary>
+  <br />
+  <table>
+    <tr>
+      <td align="center" width="50%"><img src="demo2.png" alt="Device & Tunnel Management" /><br /><sub><b>Device & Tunnel Status Management</b></sub></td>
+      <td align="center" width="50%"><img src="demo3.png" alt="Container Onboarding Wizard" /><br /><sub><b>Container Onboarding Wizard</b></sub></td>
+    </tr>
+    <tr>
+      <td align="center" width="50%"><img src="demo4.png" alt="Settings & HTTPS" /><br /><sub><b>HTTPS & System Settings</b></sub></td>
+      <td align="center" width="50%"><img src="demo5.png" alt="Mobile View & Logs" /><br /><sub><b>Mobile Adaptation & Logs</b></sub></td>
+    </tr>
+  </table>
+</details>
 
 ---
 
@@ -47,15 +56,15 @@
 
 ## Highlights
 
-- 🚀 **100% Container-Driven (Zero Source Compilation)**: Both server and client deploy via ready-to-run container images. No need to install Node.js, Go, or Python build tools on host machines.
-- ⚡ **Tencent Cloud Registry (TCR) Fast Distribution**: Distributed via public Tencent Cloud registry with high-speed CDN, eliminating DockerHub throttling and GitHub connection timeouts.
-- 📦 **Hardware-Independent Single Client Image**: Clients run a unified `frp-agent:latest` container regardless of CPU architectures (x86/ARM compatible), embedding a tailored FRP v0.71.1 in-process engine.
-- 🛡️ **Production-Grade Security**:
+- **100% Container-Driven (Zero Source Compilation)**: Both server and client deploy via ready-to-run container images. No need to install Node.js, Go, or Python build tools on host machines.
+- **Tencent Cloud Registry (TCR) Fast Distribution**: Distributed via public Tencent Cloud registry with high-speed CDN, eliminating DockerHub throttling and GitHub connection timeouts.
+- **Hardware-Independent Single Client Image**: Clients run a unified `frp-agent:latest` container regardless of CPU architectures (x86/ARM compatible), embedding a tailored FRP v0.71.1 in-process engine.
+- **Production-Grade Security**:
   - Initial login superadmin whitelist protection (prevents public hijack)
   - Pre-generated cryptographically secure tokens on port 7000
   - Reverse-proxy aware rate limiting and localhost isolation
   - Automatic Let's Encrypt TLS certificate issue and renewal
-- 📊 **Real-Time Streaming Monitoring**: WebSocket stream for client CPU, memory, real-time traffic in/out rates, and aggregated bandwidth statistics.
+- **Real-Time Streaming Monitoring**: WebSocket stream for client CPU, memory, real-time traffic in/out rates, and aggregated bandwidth statistics.
 
 ---
 
@@ -150,54 +159,7 @@ docker compose up -d
 
 Open `http://<YOUR_SERVER_IP>:8080` in your browser.
 
----
-
-<a id="quick-start-client"></a>
-
-## Client Deployment Guide
-
-Client devices run a unified container image without worrying about CPU architecture or archive extraction.
-
-Go to Web Console → **Devices** → **Add Device**, then copy the generated command:
-
-### Option 1: Docker One-Liner (Recommended for NAS / Linux Servers)
-
-For devices with Docker (Synology, QNAP, Unraid, OpenWrt, Linux):
-
-```bash
-docker run -d \
-  --name frp-agent \
-  --network host \
-  --restart always \
-  -e FRP_AGENT_TOKEN="<TOKEN_FROM_CONSOLE>" \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest \
-  -server "ws://<SERVER_IP>:8080/ws/agent/<CLIENT_ID>" \
-  -id "<CLIENT_ID>"
-```
-
-### Option 2: Linux Automated Script
-
-Auto-detects and installs Docker/Podman if missing, then starts the agent container:
-
-```bash
-curl -fsSL http://<SERVER_IP>:8080/api/frp/agent/install-script/linux?client_id=<CLIENT_ID> | sudo bash
-```
-
-### Option 3: Windows (PowerShell)
-
-In administrator PowerShell:
-
-```powershell
-irm http://<SERVER_IP>:8080/api/frp/agent/install-script/windows?client_id=<CLIENT_ID> | iex
-```
-
-### Option 4: macOS (Terminal)
-
-In Terminal:
-
-```bash
-curl -fsSL http://<SERVER_IP>:8080/api/frp/agent/install-script/darwin?client_id=<CLIENT_ID> | bash
-```
+> **Client Device Onboarding**: Once the server is running, log into the Web Console, go to **Devices** → click **Add Device**, and copy the auto-generated one-click container command or setup script to your edge device.
 
 ---
 

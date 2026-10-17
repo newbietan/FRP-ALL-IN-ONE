@@ -13,9 +13,9 @@
   </p>
   <p>
     <a href="#highlights">核心優勢</a> ·
+    <a href="#demo">效果展示</a> ·
     <a href="#architecture">架構說明</a> ·
     <a href="#quick-start-server">服務端部署</a> ·
-    <a href="#quick-start-client">客戶端部署</a> ·
     <a href="#ports">端口放行</a> ·
     <a href="#maintainer">維護者發版</a> ·
     <a href="#license">開源協議</a>
@@ -31,15 +31,24 @@
 
 ## 效果展示
 
-<img src="demo1.png" alt="Demo 1" width="900" />
-<br/><br/>
-<img src="demo2.png" alt="Demo 2" width="900" />
-<br/><br/>
-<img src="demo3.png" alt="Demo 3" width="900" />
-<br/><br/>
-<img src="demo4.png" alt="Demo 4" width="900" />
-<br/><br/>
-<img src="demo5.png" alt="Demo 5" width="900" />
+<p align="center">
+  <img src="demo1.png" alt="控制面板預覽" width="850" />
+</p>
+
+<details>
+  <summary><b>點擊展開查看更多功能介面截圖</b></summary>
+  <br />
+  <table>
+    <tr>
+      <td align="center" width="50%"><img src="demo2.png" alt="設備與隧道狀態" /><br /><sub><b>設備與隧道狀態管理</b></sub></td>
+      <td align="center" width="50%"><img src="demo3.png" alt="容器部署向導" /><br /><sub><b>添加設備與容器向導</b></sub></td>
+    </tr>
+    <tr>
+      <td align="center" width="50%"><img src="demo4.png" alt="系統設置" /><br /><sub><b>HTTPS 與網路配置</b></sub></td>
+      <td align="center" width="50%"><img src="demo5.png" alt="移動端適配" /><br /><sub><b>移動端與日誌監控</b></sub></td>
+    </tr>
+  </table>
+</details>
 
 ---
 
@@ -47,15 +56,15 @@
 
 ## 核心優勢
 
-- 🚀 **全流程容器化（免拉取源碼編譯）**：服務端與客戶端全面採用容器鏡像部署，無需在宿主機安裝任何 Node.js、Go、Python 編譯環境，告別繁重的本地構建。
-- ⚡ **騰訊雲公開鏡像極速分發**：所有組件統一收攏至騰訊雲公開容器鏡像倉庫（TCR），國內外網路均可享受極速秒拉，徹底告別 DockerHub 限流與 GitHub 網路超時。
-- 📦 **客戶端單鏡像自閉環**：客戶端統一拉取 `frp-agent:latest` 容器，**不區分芯片型號與硬體架構**（x86/ARM 通用自適應），內置定制裁剪版 FRP v0.71.1 穿透引擎，免去外部解壓配置。
-- 🛡️ **生產級安全防護**：
+- **全流程容器化（免拉取源碼編譯）**：服務端與客戶端全面採用容器鏡像部署，無需在宿主機安裝任何 Node.js、Go、Python 編譯環境，告別繁重的本地構建。
+- **騰訊雲公開鏡像極速分發**：所有組件統一收攏至騰訊雲公開容器鏡像倉庫（TCR），國內外網路均可享受極速秒拉，徹底告別 DockerHub 限流與 GitHub 網路超時。
+- **客戶端單鏡像自閉環**：客戶端統一拉取 `frp-agent:latest` 容器，不區分芯片型號與硬體架構（x86/ARM 通用自適應），內置定制裁剪版 FRP v0.71.1 穿透引擎，免去外部解壓配置。
+- **生產級安全防護**：
   - 首登超級管理員白名單防護（防止公網搶佔）
   - FRPS 默認強隨機密鑰（防止 7000 端口未授權穿透）
   - 後端嚴格綁定本地回環，具備安全反代感知限流（防止全局誤封）
   - 自動申請 Let's Encrypt TLS 證書並後台無縫續期
-- 📊 **毫秒級事件驅動監控**：WebSocket 實時流式推送客戶端 CPU、內存、實時網路出入速率及流量統計，配置變更內存級熱重載生效。
+- **毫秒級事件驅動監控**：WebSocket 實時流式推送客戶端 CPU、內存、實時網路出入速率及流量統計，配置變更內存級熱重載生效。
 
 ---
 
@@ -150,54 +159,7 @@ docker compose up -d
 
 啟動完成後，打開瀏覽器訪問 `http://<服務器IP>:8080` 即可開始使用。
 
----
-
-<a id="quick-start-client"></a>
-
-## 客戶端部署指南
-
-客戶端徹底告別傳統的硬體架構選擇（如 x86/ARM/MIPS）與外部解壓流程，**全平台統一運行定制容器鏡像**，零消耗服務端 VPS 出網帶寬。
-
-登錄管理後台，進入「設備管理」→ 點擊「添加新設備」，直接複製對應的自適應命令即可：
-
-### 方式 1：Docker 一鍵運行（NAS / 服務器推薦）
-
-適用於已安裝 Docker 的設備（如群暉/威聯通 NAS、軟路由、Linux 主機）：
-
-```bash
-docker run -d \
-  --name frp-agent \
-  --network host \
-  --restart always \
-  -e FRP_AGENT_TOKEN="<控制台生成的Token>" \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest \
-  -server "ws://<你的服務器IP>:8080/ws/agent/<設備ID>" \
-  -id "<設備ID>"
-```
-
-### 方式 2：Linux 一鍵腳本（自動檢測安裝容器）
-
-自動檢測本機環境，若未安裝 Docker/Podman 會自動通過官方安全源就緒並啟動客戶端容器：
-
-```bash
-curl -fsSL http://<你的服務器IP>:8080/api/frp/agent/install-script/linux?client_id=<設備ID> | sudo bash
-```
-
-### 方式 3：Windows 部署（PowerShell）
-
-在以管理員權限運行的 PowerShell 中執行：
-
-```powershell
-irm http://<你的服務器IP>:8080/api/frp/agent/install-script/windows?client_id=<設備ID> | iex
-```
-
-### 方式 4：macOS 部署（終端）
-
-在終端中執行：
-
-```bash
-curl -fsSL http://<你的服務器IP>:8080/api/frp/agent/install-script/darwin?client_id=<設備ID> | bash
-```
+> **客戶端接入說明**：登錄 Web 控制台後，在「設備管理」頁面點擊「添加新設備」，系統會自動生成對應的容器一鍵啟動命令，複製並在客戶端機器執行即可完成接入。
 
 ---
 
@@ -239,7 +201,7 @@ sh deploy/build-and-push.sh [版本Tag，默認 latest]
 2. **端口映射成功但外網無法訪問？**
    - 檢查雲服務器控制台的安全組規則，確認對應的遠程端口是否已開放 TCP/UDP 流量。
 3. **域名 HTTPS 證書申請失敗？**
-   - 確認域名 A 記錄已完全解析到服務器公網 IP，且安全組的 **80 端口** 已對外開放（用於 Let's Encrypt 挑戰驗證）。
+   - 確認域名 A 記錄已完全解析到服務器公网 IP，且安全組的 **80 端口** 已對外開放（用於 Let's Encrypt 挑戰驗證）。
 
 ---
 

@@ -13,9 +13,9 @@
   </p>
   <p>
     <a href="#highlights">核心优势</a> ·
+    <a href="#demo">效果演示</a> ·
     <a href="#architecture">架构说明</a> ·
     <a href="#quick-start-server">服务端部署</a> ·
-    <a href="#quick-start-client">客户端部署</a> ·
     <a href="#ports">端口放行</a> ·
     <a href="#maintainer">维护者发版</a> ·
     <a href="#license">开源协议</a>
@@ -31,15 +31,24 @@
 
 ## 效果演示
 
-<img src="demo1.png" alt="Demo 1" width="900" />
-<br/><br/>
-<img src="demo2.png" alt="Demo 2" width="900" />
-<br/><br/>
-<img src="demo3.png" alt="Demo 3" width="900" />
-<br/><br/>
-<img src="demo4.png" alt="Demo 4" width="900" />
-<br/><br/>
-<img src="demo5.png" alt="Demo 5" width="900" />
+<p align="center">
+  <img src="demo1.png" alt="控制面板预览" width="850" />
+</p>
+
+<details>
+  <summary><b>点击展开查看更多功能界面截图</b></summary>
+  <br />
+  <table>
+    <tr>
+      <td align="center" width="50%"><img src="demo2.png" alt="设备与隧道状态" /><br /><sub><b>设备与隧道状态管理</b></sub></td>
+      <td align="center" width="50%"><img src="demo3.png" alt="容器部署向导" /><br /><sub><b>添加设备与容器向导</b></sub></td>
+    </tr>
+    <tr>
+      <td align="center" width="50%"><img src="demo4.png" alt="系统设置" /><br /><sub><b>HTTPS 与网络配置</b></sub></td>
+      <td align="center" width="50%"><img src="demo5.png" alt="移动端适配" /><br /><sub><b>移动端与日志监控</b></sub></td>
+    </tr>
+  </table>
+</details>
 
 ---
 
@@ -47,15 +56,15 @@
 
 ## 核心优势
 
-- 🚀 **全流程容器化（免拉取源码编译）**：服务端与客户端全面采用容器镜像部署，无需在宿主机安装任何 Node.js、Go、Python 编译环境，告别繁重的本地构建。
-- ⚡ **腾讯云公开镜像极速分发**：所有组件统一收拢至腾讯云公开容器镜像仓库（TCR），国内网络享受千兆 CDN 极速秒拉，彻底告别 DockerHub 限流与 GitHub 网络超时。
-- 📦 **客户端单镜像自闭环**：客户端统一拉取 `frp-agent:latest` 容器，**不区分芯片型号与硬件架构**（x86/ARM 通用自适应），内置定制裁剪版 FRP v0.71.1 穿透引擎，免去外部解压配置。
-- 🛡️ **生产级安全防护**：
+- **全流程容器化（免拉取源码编译）**：服务端与客户端全面采用容器镜像部署，无需在宿主机安装任何 Node.js、Go、Python 编译环境，告别繁重的本地构建。
+- **腾讯云公开镜像极速分发**：所有组件统一收拢至腾讯云公开容器镜像仓库（TCR），国内网络享受千兆 CDN 极速秒拉，彻底告别 DockerHub 限流与 GitHub 网络超时。
+- **客户端单镜像自闭环**：客户端统一拉取 `frp-agent:latest` 容器，不区分芯片型号与硬件架构（x86/ARM 通用自适应），内置定制裁剪版 FRP v0.71.1 穿透引擎，免去外部解压配置。
+- **生产级安全防护**：
   - 首登超级管理员白名单防护（防止公网抢占）
   - FRPS 默认强随机密钥（防止 7000 端口未授权穿透）
   - 后端严格绑定本地回环，具备安全反代感知限流（防止全局误封）
   - 自动申请 Let's Encrypt TLS 证书并后台无缝续期
-- 📊 **毫秒级事件驱动监控**：WebSocket 实时流式推送客户端 CPU、内存、实时网络出入速率及流量统计，配置变更内存级热重载生效。
+- **毫秒级事件驱动监控**：WebSocket 实时流式推送客户端 CPU、内存、实时网络出入速率及流量统计，配置变更内存级热重载生效。
 
 ---
 
@@ -150,54 +159,7 @@ docker compose up -d
 
 启动完成后，打开浏览器访问 `http://<服务器IP>:8080` 即可开始使用。
 
----
-
-<a id="quick-start-client"></a>
-
-## 客户端部署指南
-
-客户端彻底告别传统的硬件架构选择（如 x86/ARM/MIPS）与外部解压流程，**全平台统一运行定制容器镜像**，零消耗服务端 VPS 出网带宽。
-
-登录管理后台，进入「设备管理」→ 点击「添加新设备」，直接复制对应的自适应命令即可：
-
-### 方式 1：Docker 一键运行（NAS / 服务器推荐）
-
-适用于已安装 Docker 的设备（如群晖/威联通 NAS、软路由、Linux 主机）：
-
-```bash
-docker run -d \
-  --name frp-agent \
-  --network host \
-  --restart always \
-  -e FRP_AGENT_TOKEN="<控制台生成的Token>" \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest \
-  -server "ws://<你的服务器IP>:8080/ws/agent/<设备ID>" \
-  -id "<设备ID>"
-```
-
-### 方式 2：Linux 一键脚本（自动检测安装容器）
-
-自动检测本机环境，若未安装 Docker/Podman 会自动通过官方安全源就绪并启动客户端容器：
-
-```bash
-curl -fsSL http://<你的服务器IP>:8080/api/frp/agent/install-script/linux?client_id=<设备ID> | sudo bash
-```
-
-### 方式 3：Windows 部署（PowerShell）
-
-在以管理员权限运行的 PowerShell 中执行：
-
-```powershell
-irm http://<你的服务器IP>:8080/api/frp/agent/install-script/windows?client_id=<设备ID> | iex
-```
-
-### 方式 4：macOS 部署（终端）
-
-在终端中执行：
-
-```bash
-curl -fsSL http://<你的服务器IP>:8080/api/frp/agent/install-script/darwin?client_id=<设备ID> | bash
-```
+> **客户端接入说明**：登录 Web 控制台后，在「设备管理」页面点击「添加新设备」，系统会自动生成对应的容器一键启动命令（支持 Docker、Linux 自动安装脚本、Windows 与 macOS 引导），复制并在客户端机器执行即可完成接入。
 
 ---
 
