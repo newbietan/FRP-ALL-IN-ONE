@@ -1,41 +1,10 @@
+---
 services:
-  backend:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest
-    container_name: frp-manager-backend
+  server:
+    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest
+    container_name: frp-server
     restart: always
-    user: root
     network_mode: host
     env_file: .env
-    environment:
-      - PODMAN_BIN=podman
-      - PODMAN_TIMEOUT=30
-      - PODMAN_URL=unix:///run/podman/podman.sock
     volumes:
-      - frp-data:/opt/frp
-      - frp-certs:/app/certs
-      - nginx-conf:/etc/nginx/conf.d
       - ./data:/app/data
-      - ./frps.toml:/app/frps.toml
-      - /run/podman/podman.sock:/run/podman/podman.sock
-
-  frontend:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest
-    container_name: frp-manager-web
-    restart: always
-    network_mode: host
-    volumes:
-      - frp-certs:/etc/nginx/certs:ro
-      - nginx-conf:/etc/nginx/conf.d
-
-  frps:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest
-    container_name: frps
-    restart: always
-    network_mode: host
-    volumes:
-      - ./frps.toml:/etc/frp/frps.toml
-
-volumes:
-  frp-data:
-  frp-certs:
-  nginx-conf:

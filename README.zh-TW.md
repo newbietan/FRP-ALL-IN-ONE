@@ -75,31 +75,23 @@
 ```mermaid
 flowchart TB
     subgraph TCR["騰訊雲公開鏡像倉庫 (TCR)"]
-        FRPS_IMG["frps:latest<br/>定制裁剪 v0.71.1 核心"]
-        BACKEND_IMG["frp-backend:latest<br/>FastAPI + SQLite"]
-        FRONTEND_IMG["frp-frontend:latest<br/>React + Nginx"]
+        SERVER_IMG["frp-server:latest<br/>全合一服務端 (Web+API+FRPS)"]
         AGENT_IMG["frp-agent:latest<br/>內置穿透引擎統一鏡像"]
     end
 
-    subgraph Server["服務端 VPS (Docker / Podman Compose)"]
-        Web["Web 介面<br/>:8080 / :443"]
-        Backend["管理後端<br/>127.0.0.1:8000"]
-        FRPS["FRPS 核心<br/>:7000 穿透 + 127.0.0.1:7500 API"]
-        Web <--> Backend
-        Backend <-->|"API 熱重載"| FRPS
+    subgraph Server["服務端 VPS (單容器極簡部署)"]
+        SingleServer["frp-server 單容器<br/>Web 控制台與管理 API :8080<br/>內嵌 FRPS 穿透核心 :7000"]
     end
 
     subgraph Clients["客戶端設備 (NAS / 雲主機 / PC / 路由器)"]
         DockerClient["容器化 Agent<br/>frp-agent:latest<br/>內置穿透引擎 + 指標監控"]
     end
 
-    FRPS_IMG -.->|"一鍵拉取"| FRPS
-    BACKEND_IMG -.->|"一鍵拉取"| Backend
-    FRONTEND_IMG -.->|"一键拉取"| Web
+    SERVER_IMG -.->|"一鍵拉取"| SingleServer
     AGENT_IMG -.->|"高速拉取"| DockerClient
 
-    DockerClient <-.->|"WebSocket 指標/日誌"| Backend
-    DockerClient <-->|"FRP 數據隧道"| FRPS
+    DockerClient <-.->|"WebSocket 指標/日誌 (:8080)"| SingleServer
+    DockerClient <-->|"FRP 數據隧道 (:7000)"| SingleServer
 ```
 
 ---
@@ -186,23 +178,21 @@ docker compose up -d
 本項目為開源維護者提供了一鍵全自動流水線，只需執行一行命令，即可完成定制版核心編譯、前端打包，並全量推送到騰訊雲公開鏡像倉庫：
 
 ```bash
-# 構建並全量推送到騰訊雲 TCR (frps, frp-backend, frp-frontend, frp-agent)
+# 構建並全量推送到騰訊雲 TCR (frp-server, frp-agent)
 bash deploy/build-and-push.sh [版本Tag，默認 latest]
 ```
 
-發布前，請在騰訊雲控制台將 `frps`、`frp-backend`、`frp-frontend`、`frp-agent` 四個鏡像倉庫分別設為**公開**。首次推送新倉庫時不要假設預設公開；推送成功不代表可以匿名拉取。
+發布前，請在騰訊雲控制台將 `frp-server`、`frp-agent` 兩個鏡像倉庫分別設為**公開**。首次推送新倉庫時不要假設預設公開；推送成功不代表可以匿名拉取。
 
 - Actions 的 `TCR_USERNAME`、`TCR_PASSWORD` 僅供維護者推送，最終使用者無需登入鏡像倉庫。
-- 鏡像工作流程會在獨立 runner 上使用空憑證設定匿名拉取四個鏡像，版本發布同時驗證版本標籤和 `latest`。驗證失敗時工作流程報錯，不會自動修改騰訊雲倉庫權限。
+- 鏡像工作流程會在獨立 runner 上使用空憑證設定匿名拉取兩個鏡像，版本發布同時驗證版本標籤和 `latest`。驗證失敗時工作流程報錯，不會自動修改騰訊雲倉庫權限。
 - 修正可見性後，可在 Actions 中重跑失敗的匿名驗證任務，無需移動既有版本標籤。
 
 維護者也可在已安裝 Docker 的機器上執行匿名驗收（不會改動既有登入設定）：
 
 ```bash
 bash deploy/check-public-images.sh \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest \
   sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 ```
 

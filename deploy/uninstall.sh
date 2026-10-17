@@ -48,7 +48,7 @@ if [ "$MODE" = server ]; then
         echo "[ERROR] 服务端请使用部署时的 root 权限运行，例如 sudo bash" >&2; exit 1
     fi
     INSTALL_DIR=${INSTALL_DIR:-/opt/frp-all-in-one}
-    NAMES="frp-manager-backend frp-manager-web frps"
+    NAMES="frp-server frp-manager-backend frp-manager-web frps"
 else
     if [ "$(uname -s)" = Darwin ]; then
         INSTALL_DIR=${INSTALL_DIR:-$HOME/.frp-all-in-one}
@@ -103,7 +103,7 @@ for cli in $CLIS; do
     fi
     AVAILABLE=1
     projects=""
-    if [ "$MODE" = server ] && [ -f "$INSTALL_DIR/compose.yml" ] && grep -Fq "$REGISTRY/frp-backend" "$INSTALL_DIR/compose.yml"; then
+    if [ "$MODE" = server ] && [ -f "$INSTALL_DIR/compose.yml" ] && grep -Eq "$REGISTRY/(frp-server|frp-backend)" "$INSTALL_DIR/compose.yml"; then
         projects="$PROJECT"
     fi
     for name in $NAMES; do
@@ -111,6 +111,7 @@ for cli in $CLIS; do
             continue
         fi
         case "$name" in
+            frp-server) component=frp-server ;;
             frp-manager-backend) component=frp-backend ;;
             frp-manager-web) component=frp-frontend ;;
             frps) component=frps ;;
@@ -158,7 +159,7 @@ if [ "$FAILED" -ne 0 ]; then
 fi
 if [ "$PURGE" -eq 1 ] && [ -d "$INSTALL_DIR" ]; then
     if [ "$MODE" = server ]; then
-        if [ -f "$INSTALL_DIR/compose.yml" ] && grep -Fq "$REGISTRY/frp-backend" "$INSTALL_DIR/compose.yml"; then
+        if [ -f "$INSTALL_DIR/compose.yml" ] && grep -Eq "$REGISTRY/(frp-server|frp-backend)" "$INSTALL_DIR/compose.yml"; then
             rm -rf -- "$INSTALL_DIR/data"
             rm -f -- "$INSTALL_DIR/.env" "$INSTALL_DIR/frps.toml" "$INSTALL_DIR/compose.yml"
             rm -f -- /etc/frp-all-in-one.env

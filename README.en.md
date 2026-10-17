@@ -75,31 +75,23 @@
 ```mermaid
 flowchart TB
     subgraph TCR["Public Tencent Cloud Registry (TCR)"]
-        FRPS_IMG["frps:latest<br/>Tailored FRP v0.71.1 Core"]
-        BACKEND_IMG["frp-backend:latest<br/>FastAPI + SQLite"]
-        FRONTEND_IMG["frp-frontend:latest<br/>React + Nginx"]
+        SERVER_IMG["frp-server:latest<br/>All-In-One Server (Web+API+FRPS)"]
         AGENT_IMG["frp-agent:latest<br/>Unified Client Container"]
     end
 
-    subgraph Server["Server VPS (Docker / Podman Compose)"]
-        Web["Web Console<br/>:8080 / :443"]
-        Backend["Backend API<br/>127.0.0.1:8000"]
-        FRPS["FRPS Engine<br/>:7000 Tunnel + 127.0.0.1:7500 API"]
-        Web <--> Backend
-        Backend <-->|"API Hot Reload"| FRPS
+    subgraph Server["Server VPS (Single Container Deployment)"]
+        SingleServer["frp-server Single Container<br/>Web Console & Management API :8080<br/>Embedded FRPS Core :7000"]
     end
 
     subgraph Clients["Client Devices (NAS / Linux / PC / Edge)"]
         DockerClient["frp-agent:latest<br/>In-Process Tunnel Engine + Monitor"]
     end
 
-    FRPS_IMG -.->|"Pull"| FRPS
-    BACKEND_IMG -.->|"Pull"| Backend
-    FRONTEND_IMG -.->|"Pull"| Web
+    SERVER_IMG -.->|"Pull"| SingleServer
     AGENT_IMG -.->|"High-speed Pull"| DockerClient
 
-    DockerClient <-.->|"WebSocket Metrics/Logs"| Backend
-    DockerClient <-->|"FRP Data Tunnel"| FRPS
+    DockerClient <-.->|"WebSocket Metrics/Logs (:8080)"| SingleServer
+    DockerClient <-->|"FRP Data Tunnel (:7000)"| SingleServer
 ```
 
 ---
@@ -186,23 +178,21 @@ Ensure the following ports are allowed in your server's security group:
 For open-source maintainers, build and publish all 4 container images to the public registry with a single command:
 
 ```bash
-# Build and push frps, frp-backend, frp-frontend, and frp-agent to TCR
+# Build and push frp-server and frp-agent to TCR
 bash deploy/build-and-push.sh [VERSION_TAG, default: latest]
 ```
 
-Before publishing, set each TCR repository (`frps`, `frp-backend`, `frp-frontend`, `frp-agent`) to **public** in the Tencent Cloud console. Do not assume repositories created on first push are public: a successful push does not prove anonymous access.
+Before publishing, set each TCR repository (`frp-server`, `frp-agent`) to **public** in the Tencent Cloud console. Do not assume repositories created on first push are public: a successful push does not prove anonymous access.
 
 - Actions secrets `TCR_USERNAME` and `TCR_PASSWORD` are only for maintainer pushes; end users do not need registry credentials.
-- The image workflow uses separate runners and empty Docker credentials to pull all four images anonymously. Versioned releases check both the version tag and `latest`. Failure fails the workflow; it does not change TCR visibility settings automatically.
+- The image workflow uses separate runners and empty Docker credentials to pull both images anonymously. Versioned releases check both the version tag and `latest`. Failure fails the workflow; it does not change TCR visibility settings automatically.
 - After correcting visibility, rerun the failed verification jobs in Actions rather than moving an existing release tag.
 
 Maintainers can also verify anonymous pulls on a machine with Docker installed, without changing existing login settings:
 
 ```bash
 bash deploy/check-public-images.sh \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest \
   sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 ```
 

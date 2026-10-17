@@ -1,22 +1,13 @@
 # ============================================================
 # FRP-ALL-IN-ONE - 构建并推送 Docker 镜像到腾讯云 TCR
 # ============================================================
-# 触发条件：
-#   1. 手动触发 (workflow_dispatch) — 可指定镜像 tag
-#   2. 推送 tag (v*) — 自动全量构建并推送 v* 与 latest 镜像
-#   3. 推送到 main 分支时，根据代码变更按需触发
-#
-# 产出：
-#   - sgccr.ccs.tencentyun.com/frp-all-in-one/frps:<tag>
-#   - sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:<tag>
-#   - sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:<tag>
-#   - sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:<tag>
+# 架构：
+#   - 服务端全合一镜像: frp-server (Web 控制台 + 管理 API + 内置 FRPS 核心)
+#   - 客户端镜像: frp-agent (内置 FRP 穿透客户端)
 #
 # 所需 GitHub Secrets:
 #   TCR_USERNAME  — 腾讯云 TCR 访问凭证用户名
 #   TCR_PASSWORD  — 腾讯云 TCR 访问凭证密码
-# 发布前须在腾讯云控制台将四个镜像仓库设为公开；推送凭据不控制仓库可见性。
-# 发布后使用隔离的空凭据配置匿名拉取，防止私有镜像被误判为可用。
 # ============================================================
 
 name: Build and Push Docker Images
@@ -48,9 +39,7 @@ permissions:
 env:
   REGISTRY: sgccr.ccs.tencentyun.com
   NAMESPACE: frp-all-in-one
-  BACKEND_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend
-  FRONTEND_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend
-  FRPS_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frps
+  SERVER_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server
   AGENT_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent
 
 jobs:
@@ -61,9 +50,7 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.changes.outputs.backend }}
-      frontend: ${{ steps.changes.outputs.frontend }}
-      frps: ${{ steps.changes.outputs.frps }}
+      server: ${{ steps.changes.outputs.server }}
       agent: ${{ steps.changes.outputs.agent }}
       tag: ${{ steps.tag.outputs.TAG }}
     steps:
@@ -95,43 +82,31 @@ jobs:
       - name: Detect file changes
         id: changes
         run: |
-          # workflow_dispatch / tag 推送：全量构建所有 4 个镜像
           event="$GITHUB_EVENT_NAME"
           ref_type="$GITHUB_REF_TYPE"
           if [ "$event" = "workflow_dispatch" ] || [ "$ref_type" = "tag" ]; then
-            echo "backend=true" >> $GITHUB_OUTPUT
-            echo "frontend=true" >> $GITHUB_OUTPUT
-            echo "frps=true" >> $GITHUB_OUTPUT
-            echo "agent=true" >> $GITHUB_OUTPUT
+            echo "server=true" >> "$GITHUB_OUTPUT"
+            echo "agent=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          BACKEND_CHANGED="false"
-          FRONTEND_CHANGED="false"
-          FRPS_CHANGED="false"
+          SERVER_CHANGED="false"
           AGENT_CHANGED="false"
 
           for file in $(git diff --name-only HEAD~1 HEAD 2>/dev/null); do
             case "$file" in
-              server/*)
-                BACKEND_CHANGED="true" ;;
-              frontend/*)
-                FRONTEND_CHANGED="true" ;;
-              core/*|deploy/frps.Dockerfile)
-                FRPS_CHANGED="true"
-                AGENT_CHANGED="true" ;;
+              server/*|frontend/*|core/*|deploy/*|\
+              .github/workflows/build-and-push.yml)
+                SERVER_CHANGED="true" ;;
               agent/cmd/*|agent/internal/*|agent/go.mod|agent/go.sum|\
               agent/Dockerfile)
                 AGENT_CHANGED="true" ;;
             esac
           done
 
-          echo "backend=${BACKEND_CHANGED}" >> $GITHUB_OUTPUT
-          echo "frontend=${FRONTEND_CHANGED}" >> $GITHUB_OUTPUT
-          echo "frps=${FRPS_CHANGED}" >> $GITHUB_OUTPUT
-          echo "agent=${AGENT_CHANGED}" >> $GITHUB_OUTPUT
-          echo ">> Changes: b=${BACKEND_CHANGED}, f=${FRONTEND_CHANGED}"
-          echo ">> Changes: s=${FRPS_CHANGED}, a=${AGENT_CHANGED}"
+          echo "server=${SERVER_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "agent=${AGENT_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo ">> Changes: s=${SERVER_CHANGED}, a=${AGENT_CHANGED}"
 
       - name: Determine tag
         id: tag
@@ -153,12 +128,12 @@ jobs:
           echo ">> Image tag: ${TAG}"
 
   # ===========================
-  # 构建并推送定制版 FRPS 镜像
+  # 构建并推送全合一服务端镜像
   # ===========================
-  build-frps:
-    name: Build FRPS Image
+  build-server:
+    name: Build Server Image (frp-server)
     needs: detect-changes
-    if: needs.detect-changes.outputs.frps == 'true'
+    if: needs.detect-changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -174,83 +149,15 @@ jobs:
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
-      - name: Build and push FRPS
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/frps.Dockerfile
-          push: true
-          tags: |
-            ${{ env.FRPS_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
-            ${{ env.FRPS_IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ===========================
-  # 构建并推送后端镜像
-  # ===========================
-  build-backend:
-    name: Build Backend Image
-    needs: detect-changes
-    if: needs.detect-changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Tencent TCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
-
-      - name: Build and push backend
+      - name: Build and push server
         uses: docker/build-push-action@v6
         with:
           context: .
           file: server/Dockerfile
           push: true
           tags: |
-            ${{ env.BACKEND_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
-            ${{ env.BACKEND_IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ===========================
-  # 构建并推送前端镜像
-  # ===========================
-  build-frontend:
-    name: Build Frontend Image
-    needs: detect-changes
-    if: needs.detect-changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Tencent TCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
-
-      - name: Build and push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: frontend
-          file: frontend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
-            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.SERVER_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
+            ${{ env.SERVER_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -258,7 +165,7 @@ jobs:
   # 构建并推送客户端 Agent 镜像
   # ===========================
   build-agent:
-    name: Build Agent Image
+    name: Build Agent Image (frp-agent)
     needs: detect-changes
     if: needs.detect-changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
@@ -288,14 +195,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # 单独的 runner 不执行登录，避免推送权限掩盖仓库私有问题。
+  # ===========================
+  # 验证镜像公开匿名可拉取性
+  # ===========================
   verify-public-images:
     name: Verify Public Image (${{ matrix.image }})
     needs:
       - detect-changes
-      - build-frps
-      - build-backend
-      - build-frontend
+      - build-server
       - build-agent
     if: >-
       ${{ always() && !cancelled() &&
@@ -307,7 +214,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [frps, frp-backend, frp-frontend, frp-agent]
+        image: [frp-server, frp-agent]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

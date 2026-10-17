@@ -1,3 +1,3 @@
-
-# Start the FastAPI server
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+#!/bin/bash
+PORT="${PORT:-8080}"
+exec python -m uvicorn main:app --host 0.0.0.0 --port "$PORT"

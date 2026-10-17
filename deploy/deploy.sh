@@ -26,7 +26,7 @@ COMPOSE_MODE=""
 CONTAINER_CLI="podman"
 LOW_MEM_NO_SWAP="0"
 PUBLIC_IP=""
-PROJECT_CONTAINERS="frp-manager-backend frp-manager-web frps"
+PROJECT_CONTAINERS="frp-server frp-manager-backend frp-manager-web frps"
 
 echo "========================================================"
 echo "  FRP-ALL-IN-ONE - 中国大陆设备内网穿透"
@@ -262,47 +262,7 @@ run_compose() {
 }
 
 ensure_container_socket() {
-    if [ "$CONTAINER_CLI" = "docker" ]; then
-        if [ -S /var/run/docker.sock ]; then
-            echo -e "${GREEN}[OK] Docker Socket 已就绪${NC}"
-            return
-        fi
-        if command -v systemctl >/dev/null 2>&1; then
-            systemctl enable --now docker || true
-            sleep 1
-        fi
-        if [ -S /var/run/docker.sock ]; then
-            echo -e "${GREEN}[OK] Docker Socket 可用${NC}"
-            return
-        fi
-        echo -e "${YELLOW}[WARN] 未检测到 /var/run/docker.sock，若使用非 Rootless Docker 请检查服务状态${NC}"
-        return
-    fi
-
-    echo "[CHECK] 启用 Podman Socket..."
-
-    mkdir -p /run/podman
-    if [ -S /run/podman/podman.sock ]; then
-        echo -e "${GREEN}[OK] Podman Socket 已存在${NC}"
-        return
-    fi
-
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable --now podman.socket || true
-        sleep 1
-    fi
-
-    if [ ! -S /run/podman/podman.sock ]; then
-        nohup podman system service --time=0 unix:///run/podman/podman.sock >/var/log/podman-system-service.log 2>&1 &
-        sleep 1
-    fi
-
-    if [ ! -S /run/podman/podman.sock ]; then
-        echo -e "${RED}[ERROR] Podman Socket 启动失败${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}[OK] Podman Socket 可用${NC}"
+    echo -e "${GREEN}[OK] 单容器自闭环架构（内部集成 FRPS 核心，无需宿主机 Socket 挂载）${NC}"
 }
 
 check_memory() {
@@ -381,49 +341,18 @@ cleanup_existing_project_containers() {
 
 ensure_compose_file() {
     if [ ! -f "$COMPOSE_FILE" ]; then
-        echo "[CONFIG] 自动生成标准容器编排配置文件 compose.yml..."
+        echo "[CONFIG] 自动生成标准单容器编排配置文件 compose.yml..."
         cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
+---
 services:
-  backend:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest
-    container_name: frp-manager-backend
+  server:
+    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest
+    container_name: frp-server
     restart: always
-    user: root
     network_mode: host
     env_file: .env
-    environment:
-      - PODMAN_BIN=podman
-      - PODMAN_TIMEOUT=30
-      - PODMAN_URL=unix:///run/podman/podman.sock
     volumes:
-      - frp-data:/opt/frp
-      - frp-certs:/app/certs
-      - nginx-conf:/etc/nginx/conf.d
       - ./data:/app/data
-      - ./frps.toml:/app/frps.toml
-      - /run/podman/podman.sock:/run/podman/podman.sock
-
-  frontend:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest
-    container_name: frp-manager-web
-    restart: always
-    network_mode: host
-    volumes:
-      - frp-certs:/etc/nginx/certs:ro
-      - nginx-conf:/etc/nginx/conf.d
-
-  frps:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest
-    container_name: frps
-    restart: always
-    network_mode: host
-    volumes:
-      - ./frps.toml:/etc/frp/frps.toml
-
-volumes:
-  frp-data:
-  frp-certs:
-  nginx-conf:
 COMPOSE_EOF
         echo -e "${GREEN}[OK] compose.yml 已就绪${NC}"
     fi
@@ -454,19 +383,10 @@ deploy_services() {
         fi
     fi
 
-    echo "[PULL] 拉取最新镜像..."
-    if ! run_compose pull backend frontend frps; then
+    echo "[PULL] 拉取最新全合一镜像..."
+    if ! run_compose pull; then
         echo -e "${YELLOW}[WARN] 镜像拉取失败，检查本地缓存...${NC}"
-        has_local="1"
-        for img in sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
-                    sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
-                    sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest; do
-            if ! $CONTAINER_CLI image inspect "$img" >/dev/null 2>&1; then
-                has_local="0"
-                echo -e "${RED}[ERROR] 本地无缓存镜像: $img${NC}"
-            fi
-        done
-        if [ "$has_local" = "0" ]; then
+        if ! $CONTAINER_CLI image inspect "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest" >/dev/null 2>&1; then
             echo -e "${RED}[ERROR] 镜像拉取失败且无本地缓存，请检查网络或镜像仓库配置${NC}"
             exit 1
         fi
@@ -478,24 +398,16 @@ deploy_services() {
     echo ""
     echo "[CHECK] 验证容器启动状态..."
     sleep 3
-    all_ok="1"
-    for name in frp-manager-backend frp-manager-web frps; do
-        if ! $CONTAINER_CLI ps --filter "name=^${name}$" --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
-            echo -e "${RED}[ERROR] 容器 ${name} 未正常运行${NC}"
-            $CONTAINER_CLI logs "$name" --tail 10 2>/dev/null || true
-            echo ""
-            all_ok="0"
-        else
-            echo -e "${GREEN}[OK] ${name} 运行中${NC}"
-        fi
-    done
-
-    if [ "$all_ok" = "0" ]; then
-        echo -e "${RED}[ERROR] 部分容器启动失败，请根据上方日志排查${NC}"
+    if ! $CONTAINER_CLI ps --filter "name=^frp-server$" --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
+        echo -e "${RED}[ERROR] 容器 frp-server 未正常运行${NC}"
+        $CONTAINER_CLI logs "frp-server" --tail 20 2>/dev/null || true
+        echo ""
         exit 1
+    else
+        echo -e "${GREEN}[OK] frp-server 运行中${NC}"
     fi
 
-    echo -e "${GREEN}[OK] 所有服务启动成功${NC}"
+    echo -e "${GREEN}[OK] 服务端单容器启动成功！${NC}"
 }
 
 show_info() {
@@ -676,7 +588,14 @@ _save_to_system_env() {
 }
 
 ensure_frps_config() {
-    local frps_file="$SCRIPT_DIR/frps.toml"
+    mkdir -p "$SCRIPT_DIR/data"
+    local frps_file="$SCRIPT_DIR/data/frps.toml"
+
+    # 兼容迁移：若根目录下存在旧版 frps.toml 则自动迁移至 data 目录
+    if [ -f "$SCRIPT_DIR/frps.toml" ] && [ ! -f "$frps_file" ]; then
+        mv "$SCRIPT_DIR/frps.toml" "$frps_file"
+    fi
+
     local init_token
     init_token=$(head -c 24 /dev/urandom | base64 | tr -d '\n/+=' | head -c 32)
 
@@ -688,18 +607,18 @@ auth.token = "${init_token}"
 # 此文件由系统自动生成
 # 请通过 Web 界面配置 FRPS，不要手动编辑
 FRPEOF
-        chmod 600 "$frps_file"
-        echo -e "${GREEN}[OK] 已初始化安全默认 frps.toml 配置（权限 0600）${NC}"
+        chmod 644 "$frps_file"
+        echo -e "${GREEN}[OK] 已初始化默认 frps.toml 配置${NC}"
     elif ! grep -q "auth.token" "$frps_file" || grep -q "init_token_placeholder" "$frps_file"; then
         if grep -q "init_token_placeholder" "$frps_file"; then
             sed -i "s|init_token_placeholder|${init_token}|g" "$frps_file"
         else
             echo "auth.token = \"${init_token}\"" >> "$frps_file"
         fi
-        chmod 600 "$frps_file"
-        echo -e "${GREEN}[OK] 已为 frps.toml 配置安全随机 auth.token（权限 0600）${NC}"
+        chmod 644 "$frps_file"
+        echo -e "${GREEN}[OK] 已为 frps.toml 配置安全随机 auth.token${NC}"
     else
-        chmod 600 "$frps_file" 2>/dev/null || true
+        chmod 644 "$frps_file" 2>/dev/null || true
     fi
 }
 

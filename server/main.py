@@ -9,16 +9,22 @@ import asyncio
 from datetime import datetime, timezone
 import hmac
 import json as _json
+import os
+from pathlib import Path
 import re
 import time as _time
 import traceback
 from urllib.parse import urlparse
 
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+
 import auth
 from core.rate_limit import setup_rate_limit
 import crud
 from database import SessionLocal, engine
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import models
 from routers import agents as agents_router
 from routers import auth as auth_router
@@ -29,7 +35,6 @@ from routers import system as system_router
 from routers.frp_server import get_frps_status
 from services.dashboard import build_full_sync_data
 from services.tls_manager import tls_manager
-from sqlalchemy.orm import Session
 from websocket_manager import manager as ws_manager
 
 # FRPS Dashboard 状态缓存（每 5 秒刷新一次，避免 WS 循环每秒调用）
@@ -65,14 +70,36 @@ app.include_router(settings_router.router, prefix="/api")
 
 @app.on_event("startup")
 def init_database():
-    """初始化数据库表"""
+    """初始化数据库表并启动核心服务"""
     models.Base.metadata.create_all(bind=engine)
     print("[OK] 数据库初始化完成。首个 GitHub 登录的用户将自动成为管理员。")
+
+    # 单容器架构：自动启动内置 FRPS 穿透核心
+    try:
+        from core.container_engine import restart_frps_service
+        res = restart_frps_service()
+        if res.returncode == 0:
+            print("[OK] 内置 FRPS 服务已启动。")
+        else:
+            print(f"[WARN] FRPS 启动返回: {res.stderr or res.stdout}")
+    except Exception as e:
+        print(f"[WARN] 启动 FRPS 核心异常: {e}")
 
     # 启动后台任务
     asyncio.create_task(background_ping_task())
     asyncio.create_task(background_cert_renew_task())
     asyncio.create_task(background_frps_status_task())
+
+
+@app.on_event("shutdown")
+def shutdown_services():
+    """停止后台任务与 FRPS 子进程"""
+    try:
+        from core.container_engine import FRPSProcessManager
+        FRPSProcessManager.stop()
+        print("[OK] FRPS 服务已安全停止。")
+    except Exception as e:
+        print(f"[WARN] 停止 FRPS 异常: {e}")
 
 
 async def background_ping_task():
@@ -484,3 +511,38 @@ async def _handle_agent_message(client_id: str, msg: dict):
                 db.commit()
         finally:
             db.close()
+
+
+# ===========================
+# 前端单页应用 (SPA) 静态资源挂载
+# ===========================
+def _get_static_dir() -> Path:
+    candidates = [
+        Path(os.environ.get("STATIC_DIR", "/app/static")),
+        Path("./static"),
+        Path("../frontend/dist"),
+        Path("./frontend/dist"),
+    ]
+    for c in candidates:
+        if c.is_dir() and (c / "index.html").is_file():
+            return c
+    return Path("/app/static")
+
+
+_static_dir = _get_static_dir()
+if _static_dir.is_dir():
+    _assets_dir = _static_dir / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_frontend(full_path: str):
+        if full_path in ("api", "ws") or full_path.startswith(("api/", "ws/")):
+            raise HTTPException(status_code=404, detail="API route not found")
+        target = _static_dir / full_path
+        if target.is_file():
+            return FileResponse(str(target))
+        index_path = _static_dir / "index.html"
+        if index_path.is_file():
+            return FileResponse(str(index_path))
+        raise HTTPException(status_code=404, detail="Frontend assets not found")

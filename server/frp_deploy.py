@@ -9,17 +9,19 @@ import re
 import secrets
 from typing import Any
 
-import httpx
 from core.container_engine import restart_frps_service
+import httpx
 
 logger = logging.getLogger(__name__)
 
 def get_frps_config_path() -> str:
-    """获取当前环境下的 FRPS 配置文件路径（优先系统路径，兼容容器与工作区）"""
+    """获取当前环境下的 FRPS 配置文件路径（单容器架构优先持久化数据目录，兼容容器与工作区）"""
     env_path = os.environ.get("FRPS_CONFIG_PATH")
     if env_path:
         return env_path
     candidates = [
+        "/app/data/frps.toml",
+        "./data/frps.toml",
         "/etc/frp/frps.toml",
         "/app/frps.toml",
         "./deploy/frps.toml",
@@ -28,9 +30,13 @@ def get_frps_config_path() -> str:
     for c in candidates:
         if os.path.exists(c):
             return c
+    if os.path.isdir("/app/data"):
+        return "/app/data/frps.toml"
+    if os.path.isdir("./data"):
+        return "./data/frps.toml"
     if os.path.isdir("/etc/frp"):
         return "/etc/frp/frps.toml"
-    return "./deploy/frps.toml"
+    return "./data/frps.toml"
 
 # 默认 FRP 版本（最新稳定版 v0.71.1）
 DEFAULT_FRP_VERSION = "0.71.1"

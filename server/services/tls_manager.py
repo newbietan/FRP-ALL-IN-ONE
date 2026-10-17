@@ -17,8 +17,20 @@ from core.container_engine import run_podman
 
 logger = logging.getLogger(__name__)
 
+
+def _get_certs_dir() -> Path:
+    env_dir = os.environ.get("FRP_CERTS_DIR")
+    if env_dir:
+        return Path(env_dir)
+    if os.path.isdir("/app/data"):
+        return Path("/app/data/certs")
+    if os.path.isdir("/app/certs"):
+        return Path("/app/certs")
+    return Path("./data/certs")
+
+
 # 证书存储路径
-CERTS_DIR = Path(os.environ.get("FRP_CERTS_DIR", "/app/certs"))
+CERTS_DIR = _get_certs_dir()
 AUTO_CERTS_DIR = CERTS_DIR / "auto"
 NGINX_CONFIG_PATH = Path("/etc/nginx/conf.d")
 
@@ -30,7 +42,8 @@ class TLSManager:
     """TLS 证书管理器"""
 
     def __init__(self):
-        AUTO_CERTS_DIR.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            AUTO_CERTS_DIR.mkdir(parents=True, exist_ok=True)
 
     def get_cert_info(self, domain: str) -> dict[str, Any] | None:
         """获取证书信息"""

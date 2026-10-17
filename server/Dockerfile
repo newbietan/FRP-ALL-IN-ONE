@@ -1,53 +1,65 @@
-FROM docker.io/library/python:3.11-slim
+# ==============================================================================
+# FRP-ALL-IN-ONE 全合一服务端镜像 (Web控制台 + 管理API + 定制FRPS穿透核心)
+# ==============================================================================
 
-# 使用阿里云镜像源（国内加速）+ 安装必要工具
+# ---- 阶段 1: 编译前端 React 静态资源 ----
+FROM node:22-alpine AS frontend-builder
+WORKDIR /build
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- 阶段 2: 编译定制版 FRPS 服务端核心 (Go 1.26) ----
+FROM golang:1.26-alpine AS frps-builder
+WORKDIR /build
+COPY core/ /build/core/
+WORKDIR /build/core/frp_custom
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /build/frps ./cmd/frps
+
+# ---- 阶段 3: Python 运行环境与整体组装 ----
+FROM python:3.11-slim
+
+# 安装必要系统工具
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
-        gnupg \
         openssl \
-        socat \
-        podman \
     && rm -rf /var/lib/apt/lists/*
-
-# 安装 acme.sh（用于自动申请 Let's Encrypt 证书）
-RUN mkdir -p /tmp/acme-install \
-    && curl -sSL https://github.com/acmesh-official/acme.sh/raw/master/acme.sh -o /tmp/acme-install/acme.sh \
-    && chmod +x /tmp/acme-install/acme.sh \
-    && cd /tmp/acme-install \
-    && ./acme.sh --install --home /opt/acme.sh --accountemail "admin@localhost" --no-cron --force \
-    && cd / \
-    && rm -rf /tmp/acme-install
-
-ENV PATH="/opt/acme.sh:$PATH"
-ENV LE_WORKING_DIR="/opt/acme.sh"
 
 WORKDIR /app
 
-# 配置 pip 使用国内镜像源并安装依赖
+# 安装 Python 依赖
 COPY server/requirements.txt ./requirements.txt
 RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ \
     && pip config set global.trusted-host mirrors.aliyun.com \
-    && pip install --upgrade pip \
+    && pip install --no-cache-dir --upgrade "pip<25.0" \
     && pip install --no-cache-dir --timeout 120 -r requirements.txt
 
-# 复制后端源码
-COPY server/ ./
+# 复制定制 FRPS 二进制
+COPY --from=frps-builder /build/frps /usr/local/bin/frps
+RUN chmod +x /usr/local/bin/frps
 
-# 创建证书目录
-RUN mkdir -p /app/certs/auto /app/certs/custom
+# 复制前端编译产物至静态目录
+COPY --from=frontend-builder /build/dist /app/static
 
-# 数据卷挂载点 (用于 SQLite、FRP、证书)
+# 复制管理后台源码
+COPY server/ /app/
+
+# 初始化持久化数据目录
+RUN mkdir -p /app/data /app/certs/auto /app/certs/custom
+
+# 数据卷挂载点（SQLite 数据库与 frps.toml 均保存在此）
 VOLUME /app/data
-VOLUME /app/certs
-VOLUME /opt/frp
 
-# 暴露端口
-EXPOSE 8000
+# 暴露端口：8080 (Web UI & API), 7000 (FRP 穿透主信令), 7500 (FRPS 内部 API)
+EXPOSE 8080 7000 7500
 
-# 以 root 运行（需要权限创建文件和启动进程）
-# 证书续期由 Python 后台任务处理，无需 cron
-# 绑定到 127.0.0.1 避免在 host 网络模式下向公网暴露 8000 端口，仅限同主机 Nginx 代理访问
-CMD python -m uvicorn main:app --host 127.0.0.1 --port 8000
+ENV PORT=8080
+ENV STATIC_DIR=/app/static
+ENV FRPS_CONFIG_PATH=/app/data/frps.toml
+
+# 启动单容器服务：FastAPI 在 0.0.0.0:8080 提供服务并在启动时自动拉起内置 FRPS
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

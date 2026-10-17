@@ -75,31 +75,23 @@
 ```mermaid
 flowchart TB
     subgraph TCR["腾讯云公开镜像仓库 (TCR)"]
-        FRPS_IMG["frps:latest<br/>定制裁剪 v0.71.1 内核"]
-        BACKEND_IMG["frp-backend:latest<br/>FastAPI + SQLite"]
-        FRONTEND_IMG["frp-frontend:latest<br/>React + Nginx"]
+        SERVER_IMG["frp-server:latest<br/>全合一服务端 (Web+API+FRPS)"]
         AGENT_IMG["frp-agent:latest<br/>内置穿透引擎统一镜像"]
     end
 
-    subgraph Server["服务端 VPS (Docker / Podman Compose)"]
-        Web["Web 界面<br/>:8080 / :443"]
-        Backend["管理后端<br/>127.0.0.1:8000"]
-        FRPS["FRPS 内核<br/>:7000 穿透 + 127.0.0.1:7500 API"]
-        Web <--> Backend
-        Backend <-->|"API 热重载"| FRPS
+    subgraph Server["服务端 VPS (单容器极简部署)"]
+        SingleServer["frp-server 单容器<br/>Web 控制台与管理 API :8080<br/>内嵌 FRPS 穿透核心 :7000"]
     end
 
     subgraph Clients["客户端设备 (NAS / 云主机 / PC / 路由器)"]
         DockerClient["容器化 Agent<br/>frp-agent:latest<br/>内置穿透引擎 + 指标监控"]
     end
 
-    FRPS_IMG -.->|"一键拉取"| FRPS
-    BACKEND_IMG -.->|"一键拉取"| Backend
-    FRONTEND_IMG -.->|"一键拉取"| Web
+    SERVER_IMG -.->|"一键拉取"| SingleServer
     AGENT_IMG -.->|"国内极速拉取"| DockerClient
 
-    DockerClient <-.->|"WebSocket 指标/日志"| Backend
-    DockerClient <-->|"FRP 数据隧道"| FRPS
+    DockerClient <-.->|"WebSocket 指标/日志 (:8080)"| SingleServer
+    DockerClient <-->|"FRP 数据隧道 (:7000)"| SingleServer
 ```
 
 ---
@@ -186,23 +178,21 @@ docker compose up -d
 本项目为开源维护者提供了一键全自动流水线，只需执行一行命令，即可完成定制版内核编译、前端打包，并全量推送到腾讯云公开镜像仓库：
 
 ```bash
-# 构建并全量推送到腾讯云 TCR (frps, frp-backend, frp-frontend, frp-agent)
+# 构建并全量推送到腾讯云 TCR (frp-server, frp-agent)
 bash deploy/build-and-push.sh [版本Tag，默认 latest]
 ```
 
-发布前，请在腾讯云控制台将 `frps`、`frp-backend`、`frp-frontend`、`frp-agent` 四个镜像仓库分别设为**公开**。首次推送新仓库时不要假设默认公开；镜像推送成功不代表可以匿名拉取。
+发布前，请在腾讯云控制台将 `frp-server`、`frp-agent` 两个镜像仓库分别设为**公开**。首次推送新仓库时不要假设默认公开；镜像推送成功不代表可以匿名拉取。
 
 - GitHub Actions 的 `TCR_USERNAME`、`TCR_PASSWORD` 仅供维护者推送使用，最终用户无需登录镜像仓库。
-- 镜像发布工作流会在独立 runner 上使用空凭据配置匿名拉取四个镜像，版本发布同时验证版本标签和 `latest`。验证失败时工作流报错，不会自动修改腾讯云仓库权限。
+- 镜像发布工作流会在独立 runner 上使用空凭据配置匿名拉取两个镜像，版本发布同时验证版本标签和 `latest`。验证失败时工作流报错，不会自动修改腾讯云仓库权限。
 - 仅需重新检查可见性时，可在 Actions 中手动重跑失败的匿名验证任务，无需移动已有版本标签。
 
 维护者也可以在已安装 Docker 的机器上执行匿名验收（不会改动已有登录配置）：
 
 ```bash
 bash deploy/check-public-images.sh \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frps:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-backend:latest \
-  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-frontend:latest \
+  sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest \
   sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest
 ```
 
