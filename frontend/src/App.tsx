@@ -271,12 +271,19 @@ export default function App() {
     safeCurrentPage * ITEMS_PER_PAGE
   );
 
-  const [newTunnelData, setNewTunnelData] = useState({
+  const [newTunnelData, setNewTunnelData] = useState<{
+    name: string;
+    type: 'tcp' | 'udp' | 'http' | 'https';
+    localIp: string;
+    localPort: number | string;
+    remotePort: number | string;
+    deviceId: string;
+  }>({
     name: 'web-service',
-    type: 'tcp' as any,
+    type: 'tcp',
     localIp: '127.0.0.1',
-    localPort: 80,
-    remotePort: 8080,
+    localPort: '',
+    remotePort: '',
     deviceId: devices[0]?.id || ''
   });
 
@@ -814,13 +821,23 @@ export default function App() {
   // Add custom tunnel via form modal
   const handleCreateTunnel = async (e: React.FormEvent) => {
     e.preventDefault();
+    const lPort = Number(newTunnelData.localPort);
+    const rPort = Number(newTunnelData.remotePort);
+    if (!lPort || lPort < 1 || lPort > 65535) {
+      triggerToast(t('请输入有效的局域网端口 (1-65535)', 'Please enter a valid local port (1-65535)'), 'warning');
+      return;
+    }
+    if (!rPort || rPort < 1 || rPort > 65535) {
+      triggerToast(t('请输入有效的服务端映射端口 (1-65535)', 'Please enter a valid remote port (1-65535)'), 'warning');
+      return;
+    }
     try {
       const created = await tunnelsApi.create(newTunnelData.deviceId, {
         name: newTunnelData.name,
         type: newTunnelData.type,
         local_ip: newTunnelData.localIp,
-        local_port: Number(newTunnelData.localPort),
-        remote_port: Number(newTunnelData.remotePort),
+        local_port: lPort,
+        remote_port: rPort,
       });
       const newTun: Tunnel = {
         id: `${newTunnelData.deviceId}-${created.id}`,
@@ -2194,7 +2211,13 @@ export default function App() {
                                                 <button
                                                   onClick={() => {
                                                     const targetIp = (device.ip && device.ip !== '未知') ? device.ip : '127.0.0.1';
-                                                    setNewTunnelData(p => ({ ...p, deviceId: device.id, localIp: targetIp }));
+                                                    setNewTunnelData(p => ({
+                                                      ...p,
+                                                      deviceId: device.id,
+                                                      localIp: targetIp,
+                                                      localPort: '',
+                                                      remotePort: '',
+                                                    }));
                                                     setAddTunnelModalOpen(true);
                                                   }}
                                                   className="bg-white hover:bg-slate-50 border border-[#E2E8F0] hover:border-slate-300 text-primary font-semibold text-[11px] py-1.5 px-3 rounded flex items-center gap-1 transition-colors cursor-pointer font-sans shadow-sm"
@@ -2556,13 +2579,7 @@ export default function App() {
                               </div>
                             </div>
                             
-                            <div className="p-5 space-y-5">
-                              <p className="font-body-md text-xs text-on-surface-variant leading-relaxed">
-                                {t('系统使用 GitHub OAuth 登录；是否启用多因素认证由 GitHub 账号设置决定。境内部署需确保服务器与浏览器可访问 GitHub。', 'Sign-in uses GitHub OAuth; MFA depends on your GitHub account settings. Both the server and browser need GitHub access.')}
-                              </p>
-                              
-                              <hr className="border-border-subtle" />
-                              
+                            <div className="p-5">
                               <div className="bg-slate-50 p-4 border border-border-subtle rounded-lg">
                                 <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2 select-none">
                                   {t('当前关联的 GITHUB 账号', 'CURRENT ASSOCIATED GITHUB ID')}
@@ -3040,7 +3057,13 @@ export default function App() {
                         type="number"
                         className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                         value={newTunnelData.localPort}
-                        onChange={(e) => setNewTunnelData(p => ({ ...p, localPort: Number(e.target.value) }))}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewTunnelData(p => ({ ...p, localPort: val === '' ? '' : Math.max(1, Math.min(65535, Number(val))) }));
+                        }}
+                        placeholder={t('例如: 22', 'e.g. 22')}
+                        min="1"
+                        max="65535"
                         required
                       />
                     </div>
@@ -3050,7 +3073,13 @@ export default function App() {
                         type="number"
                         className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                         value={newTunnelData.remotePort}
-                        onChange={(e) => setNewTunnelData(p => ({ ...p, remotePort: Number(e.target.value) }))}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewTunnelData(p => ({ ...p, remotePort: val === '' ? '' : Math.max(1, Math.min(65535, Number(val))) }));
+                        }}
+                        placeholder={t('例如: 6000', 'e.g. 6000')}
+                        min="1"
+                        max="65535"
                         required
                       />
                     </div>
