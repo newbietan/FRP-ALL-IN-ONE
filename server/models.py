@@ -7,12 +7,12 @@ from database import Base
 from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.1.0"
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 
 def parse_version_tuple(v: str) -> tuple[int, ...]:
-    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.0.1' -> (3, 0, 1)"""
+    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.1.0' -> (3, 1, 0)"""
     if not v:
         return (0, 0, 0)
     cleaned = v.lstrip("vV").strip().split("-")[0]
