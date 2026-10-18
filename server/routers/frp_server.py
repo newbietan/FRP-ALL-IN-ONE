@@ -437,7 +437,21 @@ if ($CONTAINER_CLI -eq "") {{
 
 Write-Host "[OK] 检测到容器环境: $CONTAINER_CLI" -ForegroundColor Green
 
-# 2. 创建本地配置目录与基础配置
+# 2. 嗅探宿主机局域网 IP
+$HOST_IP = ""
+try {{
+    $HOST_IP = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {{ 
+        $_.InterfaceAlias -notmatch 'vEthernet|Loopback|isatap|Teredo' -and $_.IPAddress -notmatch '^(169\\.254|127\\.)' 
+    }} | Select-Object -ExpandProperty IPAddress -First 1)
+}} catch {{}}
+
+if ($HOST_IP) {{
+    Write-Host "[OK] 检测到宿主机局域网 IP: $HOST_IP" -ForegroundColor Green
+}} else {{
+    Write-Host "[WARN] 未能自动探测到局域网 IP，Agent 启动后将尝试多级网络探测" -ForegroundColor Yellow
+}}
+
+# 3. 创建本地配置目录与基础配置
 if (!(Test-Path $INSTALL_DIR)) {{ New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null }}
 if (!(Test-Path "$INSTALL_DIR\\logs")) {{ New-Item -ItemType Directory -Path "$INSTALL_DIR\\logs" -Force | Out-Null }}
 
@@ -447,7 +461,7 @@ serverPort = $FRPS_PORT
 auth.token = "$FRPS_TOKEN"
 "@
 
-# 3. 标记归属，供卸载脚本安全识别；使用无 BOM 的 UTF-8 配置
+# 4. 标记归属，供卸载脚本安全识别；使用无 BOM 的 UTF-8 配置
 [System.IO.File]::WriteAllText("$INSTALL_DIR\\frpc.toml", $config, (New-Object System.Text.UTF8Encoding($false)))
 New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Out-Null
 & $CONTAINER_CLI rm -f frp-agent 2>$null | Out-Null
@@ -461,8 +475,10 @@ if ($LASTEXITCODE -ne 0) {{ throw "镜像拉取失败" }}
   --network host `
   --restart always `
   --label io.frp-all-in-one.role=client `
+  --label com.centurylinklabs.watchtower.enable=true `
   -v "${{INSTALL_DIR}}:/opt/frp" `
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
+  -e FRP_HOST_IP="$HOST_IP" `
   $IMAGE `
   -server "$MANAGER_WS_URL" `
   -id "$CLIENT_ID" `
@@ -473,6 +489,11 @@ if ($LASTEXITCODE -ne 0) {{ throw "客户端容器启动失败" }}
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host "  部署成功！FRP-Agent 容器已在后台运行" -ForegroundColor Green
 Write-Host "======================================================" -ForegroundColor Green
+Write-Host "容器名称: frp-agent"
+Write-Host "客户端 ID: $CLIENT_ID"
+if ($HOST_IP) {{
+    Write-Host "宿主机 IP: $HOST_IP (在管理面板配置隧道时推荐使用此 IP，勿填 127.0.0.1)" -ForegroundColor Cyan
+}}
 Write-Host "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
 Write-Host "查看日志: $CONTAINER_CLI logs -f frp-agent"
 Write-Host "卸载（保留配置和日志）:"
@@ -575,8 +596,33 @@ fi
 
 log_ok "使用容器引擎: $CONTAINER_CLI"
 
-# 2. 创建本地配置目录与基础配置文件
-log_info "[2/4] 创建本地配置目录: $INSTALL_DIR..."
+# 2. 嗅探宿主机实际局域网 IP（供 Agent 回传及配置隧道使用）
+log_info "[2/5] 探测宿主机局域网 IP..."
+HOST_IP=""
+if [ "{os_type}" = "darwin" ]; then
+    DEFAULT_IF=$(route -n get default 2>/dev/null | awk '/interface:/{{print $2}}')
+    if [ -n "$DEFAULT_IF" ]; then
+        HOST_IP=$(ipconfig getifaddr "$DEFAULT_IF" 2>/dev/null || true)
+    fi
+    if [ -z "$HOST_IP" ]; then
+        HOST_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+    fi
+else
+    # Linux: 优先通过路由探测出接口源 IP，回退到 hostname -I
+    HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{{for(i=1;i<=NF;i++)if($i=="src")print $(i+1)}}' || true)
+    if [ -z "$HOST_IP" ]; then
+        HOST_IP=$(hostname -I 2>/dev/null | awk '{{print $1}}' || true)
+    fi
+fi
+
+if [ -n "$HOST_IP" ]; then
+    log_ok "检测到宿主机局域网 IP: $HOST_IP"
+else
+    log_warn "未能自动探测到局域网 IP，Agent 启动后将尝试多级网络探测"
+fi
+
+# 3. 创建本地配置目录与基础配置文件
+log_info "[3/5] 创建本地配置目录: $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/logs"
 
@@ -589,12 +635,12 @@ chmod 600 "$INSTALL_DIR/frpc.toml"
 touch "$INSTALL_DIR/.frp-all-in-one-client"
 log_ok "本地配置文件已创建 (0600 权限)"
 
-# 3. 清理已存在的旧 Agent 容器
-log_info "[3/4] 检查并清理旧容器..."
+# 4. 清理已存在的旧 Agent 容器
+log_info "[4/5] 检查并清理旧容器..."
 $CONTAINER_CLI rm -f frp-agent 2>/dev/null || true
 
-# 4. 从腾讯云公开镜像仓库秒级拉取并启动
-log_info "[4/4] 从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..."
+# 5. 从腾讯云公开镜像仓库秒级拉取并启动
+log_info "[5/5] 从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..."
 $CONTAINER_CLI pull "$IMAGE"
 
 $CONTAINER_CLI run -d \\
@@ -602,8 +648,10 @@ $CONTAINER_CLI run -d \\
   --network host \\
   --restart always \\
   --label io.frp-all-in-one.role=client \\
+  --label com.centurylinklabs.watchtower.enable=true \\
   -v "$INSTALL_DIR:/opt/frp" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
+  -e FRP_HOST_IP="$HOST_IP" \\
   "$IMAGE" \\
   -server "$MANAGER_WS_URL" \\
   -id "$CLIENT_ID" \\
@@ -616,6 +664,9 @@ echo -e "${{GREEN}}  部署成功！FRP-Agent 容器已在后台运行${{NC}}"
 echo -e "${{GREEN}}======================================================${{NC}}"
 echo "容器名称: frp-agent"
 echo "客户端 ID: $CLIENT_ID"
+if [ -n "$HOST_IP" ]; then
+    echo -e "宿主机 IP: ${{GREEN}}$HOST_IP${{NC}} (在管理面板配置隧道时推荐使用此 IP，勿填 127.0.0.1)"
+fi
 echo "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
 echo "查看日志: $CONTAINER_CLI logs -f frp-agent"
 echo "卸载（保留配置和日志）:"

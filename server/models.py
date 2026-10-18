@@ -1,11 +1,35 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import enum
+from datetime import datetime, timezone
 
 from database import Base
 from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+APP_VERSION = "3.0.1"
+GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
+
+
+def parse_version_tuple(v: str) -> tuple[int, ...]:
+    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.0.1' -> (3, 0, 1)"""
+    if not v:
+        return (0, 0, 0)
+    cleaned = v.lstrip("vV").strip().split("-")[0]
+    parts: list[int] = []
+    for item in cleaned.split("."):
+        try:
+            parts.append(int(item))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def is_newer_version(latest_tag: str, current_tag: str) -> bool:
+    """判断 latest_tag 是否比 current_tag 更高"""
+    return parse_version_tuple(latest_tag) > parse_version_tuple(current_tag)
 
 
 class TunnelType(str, enum.Enum):
@@ -111,6 +135,8 @@ class AgentInfo(Base):
     arch: Mapped[str | None] = mapped_column(String, nullable=True)  # 架构
     agent_version: Mapped[str | None] = mapped_column(String, nullable=True)  # Agent 版本
     platform: Mapped[str | None] = mapped_column(String, nullable=True)  # 平台详情
+    ip: Mapped[str | None] = mapped_column(String, nullable=True)  # 嗅探到的宿主机/局域网主 IP
+    ips: Mapped[str | None] = mapped_column(String, nullable=True)  # 候选 IP 列表 (JSON 格式)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

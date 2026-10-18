@@ -1,18 +1,56 @@
 """
 客户端和隧道管理路由
 """
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List
+import json
 
 import crud
 import models
 import schemas
 from database import SessionLocal
-from core import get_db, get_current_user
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from websocket_manager import manager as ws_manager
 
+from core import get_current_user, get_db
+
 router = APIRouter(prefix="/clients", tags=["客户端管理"])
+
+
+def _build_client_agent_info(db: Session, client_id: str) -> dict:
+    """获取客户端的 agent_info，合并内存缓存与数据库持久化数据"""
+    cached = ws_manager.agent_system_info.get(client_id, {})
+    agent_info = dict(cached)
+    db_agent = db.query(models.AgentInfo).filter(
+        models.AgentInfo.client_id == client_id
+    ).first()
+    if db_agent:
+        if not agent_info.get("hostname"):
+            agent_info["hostname"] = db_agent.hostname
+        if not agent_info.get("os"):
+            agent_info["os"] = db_agent.os
+        if not agent_info.get("arch"):
+            agent_info["arch"] = db_agent.arch
+        if not agent_info.get("agent_version"):
+            agent_info["agent_version"] = db_agent.agent_version
+        if not agent_info.get("platform"):
+            agent_info["platform"] = db_agent.platform
+        if not agent_info.get("ip"):
+            agent_info["ip"] = db_agent.ip
+        if not agent_info.get("ips") and db_agent.ips:
+            try:
+                agent_info["ips"] = json.loads(db_agent.ips) if db_agent.ips.startswith("[") else [x.strip() for x in db_agent.ips.split(",") if x.strip()]
+            except Exception:
+                agent_info["ips"] = [db_agent.ips]
+
+    agent_info["online"] = ws_manager.is_agent_online(client_id)
+    agent_ver = agent_info.get("agent_version") or ""
+    current_server_ver = f"v{models.APP_VERSION}"
+    if agent_ver:
+        agent_info["has_update"] = models.is_newer_version(current_server_ver, agent_ver)
+    else:
+        agent_info["has_update"] = False
+    agent_info["latest_version"] = current_server_ver
+    return agent_info
 
 
 def _render_frpc_toml(db: Session, client: models.Client) -> str | None:
@@ -97,7 +135,7 @@ def create_client(
     raise HTTPException(status_code=403, detail="Clients must be created by agent registration")
 
 
-@router.get("/", response_model=List[schemas.Client])
+@router.get("/", response_model=list[schemas.Client])
 def read_clients(
     skip: int = 0,
     limit: int = 100,
@@ -106,35 +144,8 @@ def read_clients(
 ):
     """获取客户端列表"""
     clients = crud.get_clients(db, skip=skip, limit=limit)
-    # 为每个客户端附加 agent_info（从 WebSocket 缓存或数据库）
-    from websocket_manager import manager as ws_manager
     for client in clients:
-        agent_info = ws_manager.agent_system_info.get(client.id, {})
-        if not agent_info:
-            # 从数据库查询
-            db_agent = db.query(models.AgentInfo).filter(
-                models.AgentInfo.client_id == client.id
-            ).first()
-            if db_agent:
-                agent_info = {
-                    "hostname": db_agent.hostname,
-                    "os": db_agent.os,
-                    "arch": db_agent.arch,
-                    "agent_version": db_agent.agent_version,
-                    "platform": db_agent.platform,
-                }
-        # 标记在线状态（基于 WebSocket 连接）
-        agent_info["online"] = ws_manager.is_agent_online(client.id)
-        # 附加最新的系统指标
-        if client.id in ws_manager.agent_system_info:
-            cached = ws_manager.agent_system_info[client.id]
-            for key in ("cpu_percent", "memory_percent", "memory_used", "memory_total",
-                        "disk_percent", "disk_used", "disk_total",
-                        "net_speed_in", "net_speed_out", "net_bytes_in", "net_bytes_out"):
-                if key in cached:
-                    agent_info[key] = cached[key]
-        # 将 agent_info 作为额外属性挂载到 client 对象上
-        client.agent_info = agent_info
+        client.agent_info = _build_client_agent_info(db, client.id)
     return clients
 
 
@@ -148,6 +159,7 @@ def read_client(
     db_client = crud.get_client(db, client_id=client_id)
     if db_client is None:
         raise HTTPException(status_code=404, detail="Client not found")
+    db_client.agent_info = _build_client_agent_info(db, db_client.id)
     return db_client
 
 

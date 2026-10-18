@@ -8,3 +8,21 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # 可选：Watchtower 自动镜像升级服务
+  # 启动命令: docker compose --profile auto-update up -d
+  # 开启后，每隔 30 分钟自动检查并平滑拉取腾讯云最新镜像，零感知无缝完成版本升级
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: frp-watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 1800 --cleanup --label-enable
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_LABEL_ENABLE=true
+    profiles:
+      - auto-update

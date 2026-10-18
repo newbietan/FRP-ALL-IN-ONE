@@ -31,7 +31,7 @@ import (
 )
 
 var (
-	version   = "3.0.0"
+	version   = "3.0.1"
 	buildTime = "unknown"
 )
 
@@ -122,6 +122,15 @@ func main() {
 		case "restart":
 			log.Println("收到重启命令...")
 			frpcManager.Restart()
+		case "upgrade":
+			log.Println("[Upgrade] 收到服务端远程升级信号...")
+			wsClient.Send("log", "[Upgrade] 收到服务端远程升级指令，正在准备更新...")
+			wsClient.Send("upgrade_status", map[string]interface{}{
+				"client_id": cfg.ClientID,
+				"status":    "acknowledged",
+				"version":   version,
+				"message":   "客户端已确认收到升级信号",
+			})
 		case "ping":
 			wsClient.Send("pong", nil)
 		}

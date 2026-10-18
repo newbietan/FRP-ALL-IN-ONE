@@ -5,10 +5,10 @@ WebSocket 连接管理器
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 import contextlib
-from datetime import datetime, timezone
 import logging
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket
@@ -149,8 +149,10 @@ class ConnectionManager:
         return True
 
     def update_agent_system_info(self, client_id: str, system_info: dict[str, Any]):
-        """更新 Agent 系统信息"""
+        """更新 Agent 系统信息（增量合并，保留已有属性如 ip/hostname）"""
+        prev = self.agent_system_info.get(client_id, {})
         self.agent_system_info[client_id] = {
+            **prev,
             **system_info,
             "online": True,
             "last_update": asyncio.get_event_loop().time() if asyncio.get_event_loop().is_running() else 0

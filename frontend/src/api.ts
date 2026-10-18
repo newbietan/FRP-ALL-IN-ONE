@@ -304,4 +304,47 @@ export const systemApi = {
       frps_version: string;
     }>('GET', '/api/system/info');
   },
+
+  /** 检查版本更新 */
+  checkUpdate(force = false) {
+    return request<{
+      current_version: string;
+      latest_version: string;
+      has_update: boolean;
+      release_name?: string;
+      release_notes?: string;
+      published_at?: string;
+      html_url?: string;
+      checked_at: number;
+      error?: string | null;
+    }>('GET', `/api/system/check-update${force ? '?force=true' : ''}`);
+  },
+};
+
+// ===========================
+// Agent 客户端远程管理与升级
+// ===========================
+
+export const agentsApi = {
+  /** 触发指定 Agent 远程升级 */
+  upgrade(clientId: string) {
+    return request<{
+      success: boolean;
+      is_online: boolean;
+      signal_sent: boolean;
+      client_id: string;
+      target_version: string;
+      upgrade_command: string;
+      message: string;
+    }>('POST', `/api/agents/${clientId}/upgrade`);
+  },
+
+  /** 批量触发所有在线过期 Agent 升级 */
+  batchUpgrade() {
+    return request<{
+      success: boolean;
+      upgraded_count: number;
+      details: Array<{ client_id: string; name: string; signal_sent: boolean }>;
+    }>('POST', '/api/agents/batch-upgrade');
+  },
 };

@@ -5,13 +5,13 @@ import os
 import time
 from datetime import datetime
 
+import crud
+import frp_deploy
+import models
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-import crud
-import models
-import frp_deploy
-from core import get_db, get_current_user
+from core import get_current_user, get_db
 
 router = APIRouter(prefix="/system", tags=["系统状态"])
 
@@ -109,3 +109,16 @@ def get_system_info(
         "total_tunnels": tunnel_count,
         "frps_version": frps_version,
     }
+
+
+@router.get("/check-update")
+async def check_system_update(
+    force: bool = False,
+    current_user: models.Admin = Depends(get_current_user)
+):
+    """
+    检查系统是否有新版本更新
+    force=True 时强制跳过缓存直接查询 GitHub Releases
+    """
+    from services.update_checker import check_github_update
+    return await check_github_update(force=force)

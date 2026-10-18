@@ -6,26 +6,24 @@ FRP Manager API - 主入口
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import hmac
 import json as _json
 import os
-from pathlib import Path
 import re
 import time as _time
 import traceback
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
+import auth
+import crud
+import models
+from core.rate_limit import setup_rate_limit
+from database import SessionLocal, engine
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
-
-import auth
-from core.rate_limit import setup_rate_limit
-import crud
-from database import SessionLocal, engine
-import models
 from routers import agents as agents_router
 from routers import auth as auth_router
 from routers import clients as clients_router
@@ -35,13 +33,29 @@ from routers import system as system_router
 from routers.frp_server import get_frps_status
 from services.dashboard import build_full_sync_data
 from services.tls_manager import tls_manager
+from sqlalchemy.orm import Session
 from websocket_manager import manager as ws_manager
 
 # FRPS Dashboard 状态缓存（每 5 秒刷新一次，避免 WS 循环每秒调用）
 _frps_cache: dict = {"data": None, "ts": 0.0}
 
-# 创建数据库表
+def _auto_migrate_db(bind_engine):
+    """自动补充 SQLite 数据库中缺失的列"""
+    try:
+        with bind_engine.connect() as conn:
+            res = conn.exec_driver_sql("PRAGMA table_info(agent_info)").fetchall()
+            cols = {r[1] for r in res}
+            if cols and "ip" not in cols:
+                conn.exec_driver_sql("ALTER TABLE agent_info ADD COLUMN ip VARCHAR")
+            if cols and "ips" not in cols:
+                conn.exec_driver_sql("ALTER TABLE agent_info ADD COLUMN ips VARCHAR")
+            conn.commit()
+    except Exception as e:
+        print(f"[WARN] 数据库自动迁移检查异常: {e}")
+
+# 创建数据库表并执行轻量迁移
 models.Base.metadata.create_all(bind=engine)
+_auto_migrate_db(engine)
 
 app = FastAPI(title="FRP Manager API")
 
@@ -72,6 +86,7 @@ app.include_router(settings_router.router, prefix="/api")
 def init_database():
     """初始化数据库表并启动核心服务"""
     models.Base.metadata.create_all(bind=engine)
+    _auto_migrate_db(engine)
     print("[OK] 数据库初始化完成。首个 GitHub 登录的用户将自动成为管理员。")
 
     # 单容器架构：自动启动内置 FRPS 穿透核心
@@ -390,6 +405,13 @@ async def _handle_agent_message(client_id: str, msg: dict):
             arch = _sanitize_agent_str(raw.get("arch"), 16)
             version = _sanitize_agent_str(raw.get("version"), 32)
             platform = _sanitize_agent_str(raw.get("platform"), 128)
+            ip = _sanitize_agent_str(raw.get("ip"), 64)
+            raw_ips = raw.get("ips")
+            ips_str = None
+            if isinstance(raw_ips, list):
+                ips_str = _json.dumps([_sanitize_agent_str(x, 64) for x in raw_ips if x])
+            elif isinstance(raw_ips, str):
+                ips_str = _sanitize_agent_str(raw_ips, 512)
 
             if hostname:
                 client = crud.get_client(db, client_id=client_id)
@@ -406,6 +428,10 @@ async def _handle_agent_message(client_id: str, msg: dict):
                 agent.arch = arch or agent.arch
                 agent.agent_version = version or agent.agent_version
                 agent.platform = platform or agent.platform
+                if ip:
+                    agent.ip = ip
+                if ips_str:
+                    agent.ips = ips_str
             else:
                 agent = models.AgentInfo(
                     client_id=client_id,
@@ -414,10 +440,26 @@ async def _handle_agent_message(client_id: str, msg: dict):
                     arch=arch,
                     agent_version=version,
                     platform=platform,
+                    ip=ip,
+                    ips=ips_str,
                 )
                 db.add(agent)
 
             db.commit()
+
+            # 同步更新 WebSocket 内存状态
+            cached_update = {
+                "hostname": hostname,
+                "os": os_name,
+                "arch": arch,
+                "version": version,
+                "platform": platform,
+            }
+            if ip:
+                cached_update["ip"] = ip
+            if raw_ips:
+                cached_update["ips"] = raw_ips if isinstance(raw_ips, list) else [raw_ips]
+            ws_manager.update_agent_system_info(client_id, cached_update)
         finally:
             db.close()
 
@@ -453,6 +495,14 @@ async def _handle_agent_message(client_id: str, msg: dict):
                     agent.os = _sanitize_agent_str(data["os"], 32) or agent.os
                 if "arch" in data:
                     agent.arch = _sanitize_agent_str(data["arch"], 16) or agent.arch
+                if "ip" in data and data["ip"]:
+                    agent.ip = _sanitize_agent_str(data["ip"], 64) or agent.ip
+                if "ips" in data and data["ips"]:
+                    raw_ips = data["ips"]
+                    if isinstance(raw_ips, list):
+                        agent.ips = _json.dumps([_sanitize_agent_str(x, 64) for x in raw_ips if x])
+                    elif isinstance(raw_ips, str):
+                        agent.ips = _sanitize_agent_str(raw_ips, 512)
 
             # 持久化当前指标（每 30 秒一条，取代每次都写）
             metrics = models.SystemMetrics(

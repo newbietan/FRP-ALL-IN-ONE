@@ -121,18 +121,21 @@ func (c *Client) connect() error {
 
 	log.Println("[WebSocket] 连接成功")
 
-	// 获取系统信息
+	// 获取系统信息与探测宿主机局域网 IP
 	hostname, _ := os.Hostname()
 	hostInfo := monitor.GetHostInfo()
+	primaryIP, candidateIPs := monitor.DetectHostIP()
 
-	// 发送注册消息（包含系统信息）
-	c.Send("register", map[string]string{
+	// 发送注册消息（包含系统信息及嗅探到的宿主机IP）
+	c.Send("register", map[string]interface{}{
 		"client_id": c.clientID,
 		"version":   c.version,
 		"hostname":  hostname,
 		"os":        runtime.GOOS,
 		"arch":      runtime.GOARCH,
 		"platform":  hostInfo["platform"],
+		"ip":        primaryIP,
+		"ips":       candidateIPs,
 	})
 
 	if c.OnConnect != nil {

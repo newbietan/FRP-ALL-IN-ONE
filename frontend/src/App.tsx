@@ -47,7 +47,9 @@ import {
   BookOpen, 
   Code,
   Search,
-  Filter
+  Filter,
+  Sparkles,
+  ArrowUpCircle
 } from 'lucide-react';
 import { Screen, Device, Tunnel, ServerConfig, GlobalSettings, OS } from './types';
 import {
@@ -56,7 +58,7 @@ import {
   getClientUninstallCommand
 } from './data';
 import { APP_VERSION_DISPLAY } from './version';
-import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, isLoggedIn, setToken, clearToken } from './api';
+import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, agentsApi, isLoggedIn, setToken, clearToken } from './api';
 import { dashboardWs } from './ws';
 
 // Navigation transitions simulation mapping
@@ -163,6 +165,25 @@ export default function App() {
   const [expandedDeviceIds, setExpandedDeviceIds] = useState<Record<string, boolean>>({
     'dev-l8wPz9K2': true // expand first Ubuntu by default
   });
+
+  // 版本检测与升级弹窗状态
+  interface UpdateInfo {
+    current_version: string;
+    latest_version: string;
+    has_update: boolean;
+    release_name?: string;
+    release_notes?: string;
+    published_at?: string;
+    html_url?: string;
+    checked_at: number;
+    error?: string | null;
+  }
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState<boolean>(false);
+  const [checkUpdateLoading, setCheckUpdateLoading] = useState<boolean>(false);
+  const [upgradeTargetDevice, setUpgradeTargetDevice] = useState<Device | null>(null);
+  const [upgradingDevice, setUpgradingDevice] = useState<boolean>(false);
+  const [batchUpgrading, setBatchUpgrading] = useState<boolean>(false);
   
   const totals = useMemo(() => {
     let totalUploadMB = 0;
@@ -197,6 +218,10 @@ export default function App() {
       upload: formatVal(totalUploadMB),
       download: formatVal(totalDownloadMB)
     };
+  }, [devices]);
+
+  const outdatedDevices = useMemo(() => {
+    return devices.filter(d => d.hasUpdate);
   }, [devices]);
 
   const filteredDevices = useMemo(() => {
@@ -448,11 +473,19 @@ export default function App() {
     const os: OS = (agent.os === 'darwin' ? 'macos' : agent.os) || 'linux';
     // 优先使用 agent_info.online（实时 WebSocket 状态），其次 is_online，最后 client.status
     const onlineStatus = agent.online ?? client.is_online ?? (client.status === 'online');
+    const detectedIp = agent.ip || client.ip || '';
+    const rawIps = agent.ips || client.ips || [];
+    const ipsList: string[] = Array.isArray(rawIps) ? rawIps : (typeof rawIps === 'string' && rawIps ? [rawIps] : []);
+    const hasUpdate = agent.has_update ?? client.has_update ?? false;
+    const latestVersion = agent.latest_version || client.latest_version || '';
     return {
       id: client.id,
       name: agent.hostname || client.name || client.id,
       os,
-      ip: agent.ip || '未知',
+      ip: detectedIp || '未知',
+      ips: ipsList,
+      hasUpdate,
+      latestVersion,
       status: onlineStatus ? 'online' : 'offline',
       lastSeen: client.last_seen || '-',
       tunnelsCount: client.tunnels?.length || 0,
@@ -462,7 +495,13 @@ export default function App() {
       uploadRate: agent.net_speed_out != null ? `${(agent.net_speed_out / 1024).toFixed(1)} KB/s` : '0 KB/s',
       downloadRate: agent.net_speed_in != null ? `${(agent.net_speed_in / 1024).toFixed(1)} KB/s` : '0 KB/s',
       totalTraffic: formatBytes((agent.net_bytes_in || 0) + (agent.net_bytes_out || 0)),
-      agentInfo: agent,
+      agentInfo: {
+        ...agent,
+        ip: detectedIp,
+        ips: ipsList,
+        has_update: hasUpdate,
+        latest_version: latestVersion,
+      },
     };
   };
 
@@ -560,6 +599,13 @@ export default function App() {
       } catch (_err) {
         void _err;
       }
+
+      // 静默检查版本更新
+      try {
+        checkSystemUpdate(false);
+      } catch (_err) {
+        void _err;
+      }
     } catch (err: any) {
       if (err.status === 401 || err.status === 403) {
         clearToken();
@@ -581,6 +627,58 @@ export default function App() {
     setTimeout(() => {
       setToast(null);
     }, 3000);
+  };
+
+  // 检查版本更新
+  const checkSystemUpdate = async (force = false) => {
+    try {
+      setCheckUpdateLoading(true);
+      const res = await systemApi.checkUpdate(force);
+      setUpdateInfo(res);
+      if (force) {
+        if (res.has_update) {
+          triggerToast(t(`发现新版本 ${res.latest_version}！`, `New version ${res.latest_version} available!`), 'info');
+        } else {
+          triggerToast(t('当前系统已是最新版本', 'Already running latest version'), 'success');
+        }
+      }
+    } catch (err: any) {
+      if (force) {
+        triggerToast(t(`检查更新失败: ${err.message}`, `Check update failed: ${err.message}`), 'warning');
+      }
+    } finally {
+      setCheckUpdateLoading(false);
+    }
+  };
+
+  // 触发单个 Agent 远程升级
+  const handleUpgradeSingleAgent = async (device: Device) => {
+    try {
+      setUpgradingDevice(true);
+      const res = await agentsApi.upgrade(device.id);
+      if (res.signal_sent) {
+        triggerToast(t(`已向客户端 '${device.name}' 下发远程升级信号！`, `Upgrade signal sent to '${device.name}'!`), 'success');
+      } else {
+        triggerToast(t('客户端离线，请复制升级命令在宿主机执行', 'Client offline. Copy and run the command on host.'), 'info');
+      }
+    } catch (err: any) {
+      triggerToast(t(`升级信号发送失败: ${err.message}`, `Upgrade failed: ${err.message}`), 'warning');
+    } finally {
+      setUpgradingDevice(false);
+    }
+  };
+
+  // 批量触发所有在线旧版本 Agent 升级
+  const handleBatchUpgradeAgents = async () => {
+    try {
+      setBatchUpgrading(true);
+      const res = await agentsApi.batchUpgrade();
+      triggerToast(t(`已向 ${res.upgraded_count} 台在线旧版本设备发送升级信号！`, `Sent upgrade signals to ${res.upgraded_count} devices!`), 'success');
+    } catch (err: any) {
+      triggerToast(t(`批量升级失败: ${err.message}`, `Batch upgrade failed: ${err.message}`), 'warning');
+    } finally {
+      setBatchUpgrading(false);
+    }
   };
 
   // Change screen helper with direction mapping matching navigation specification
@@ -1327,7 +1425,18 @@ export default function App() {
                       <h1 className="font-headline font-black text-[#006782] text-sm tracking-tight leading-none">
                         FRP-ALL-IN-ONE
                       </h1>
-                      <p className="font-mono text-[9px] text-[#6d797f] font-semibold tracking-wider mt-1">{APP_VERSION_DISPLAY}</p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <p className="font-mono text-[9px] text-[#6d797f] font-semibold tracking-wider">{APP_VERSION_DISPLAY}</p>
+                        {updateInfo?.has_update && (
+                          <button
+                            onClick={() => setUpdateModalOpen(true)}
+                            className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-500/20 text-amber-700 border border-amber-300 hover:bg-amber-500/30 transition-all cursor-pointer animate-pulse"
+                            title={t('点击查看新版本详情与升级指引', 'Click to view update details')}
+                          >
+                            NEW {updateInfo.latest_version}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1448,6 +1557,16 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center justify-center gap-4 text-xs font-mono h-full">
+                    {updateInfo?.has_update && (
+                      <button
+                        onClick={() => setUpdateModalOpen(true)}
+                        className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shadow-sm animate-pulse"
+                        title={t('发现新版本，点击查看升级指引', 'New version available, click to view')}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                        <span>{t(`发现新版 ${updateInfo.latest_version}`, `New Version ${updateInfo.latest_version}`)}</span>
+                      </button>
+                    )}
                     <div className="hidden lg:flex items-center justify-center gap-1.5 text-on-surface-variant">
                       <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
                       <span className="leading-none">{t('IP 地址', 'IP Address')}: {serverConfig.ip}</span>
@@ -1934,7 +2053,25 @@ export default function App() {
                                         <td className="py-4 px-4">
                                           <div className="font-mono text-xs font-semibold text-[#1e293b] flex items-center gap-2">
                                             {device.name}
+                                            {device.hasUpdate && (
+                                              <span
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setUpgradeTargetDevice(device);
+                                                }}
+                                                className="text-[9px] bg-amber-50 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-mono font-semibold flex items-center gap-1 cursor-pointer hover:bg-amber-100 transition-colors"
+                                                title={t('客户端版本可升级，点击查看升级方式', 'Client update available, click to view')}
+                                              >
+                                                <Sparkles className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                                {t('可升级', 'Update')}
+                                              </span>
+                                            )}
                                             <ChevronRight className={`w-3.5 h-3.5 text-outline group-hover:text-primary transition-all shrink-0 ${isExpanded ? 'rotate-90 text-primary' : ''}`} />
+                                          </div>
+                                          <div className="font-mono text-[10px] text-outline mt-0.5 flex items-center gap-2">
+                                            <span>IP: {device.ip}</span>
+                                            <span>·</span>
+                                            <span>Agent: {device.agentInfo?.agent_version ? `v${device.agentInfo.agent_version}` : 'v3.0.0'}</span>
                                           </div>
                                           <div className="font-mono text-[10px] text-outline mt-0.5 md:hidden">
                                             CPU {device.cpuUsage}% · MEM {device.memUsage}% · DISK {Math.round(device.agentInfo?.disk_percent || 0)}%
@@ -1977,6 +2114,15 @@ export default function App() {
                                         
                                         <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                                           <div className="flex justify-end gap-1.5">
+                                            {device.hasUpdate && (
+                                              <button
+                                                onClick={() => setUpgradeTargetDevice(device)}
+                                                className="p-1 px-1.5 text-amber-600 hover:text-amber-700 rounded hover:bg-amber-50 transition-colors cursor-pointer"
+                                                title={t('升级此客户端 Agent', 'Upgrade Client Agent')}
+                                              >
+                                                <ArrowUpCircle className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
                                             <button
                                               onClick={() => {
                                                 setLogModalDevice(device);
@@ -2025,7 +2171,8 @@ export default function App() {
                                                 </h4>
                                                 <button
                                                   onClick={() => {
-                                                    setNewTunnelData(p => ({ ...p, deviceId: device.id }));
+                                                    const targetIp = (device.ip && device.ip !== '未知') ? device.ip : '127.0.0.1';
+                                                    setNewTunnelData(p => ({ ...p, deviceId: device.id, localIp: targetIp }));
                                                     setAddTunnelModalOpen(true);
                                                   }}
                                                   className="bg-white hover:bg-slate-50 border border-[#E2E8F0] hover:border-slate-300 text-primary font-semibold text-[11px] py-1.5 px-3 rounded flex items-center gap-1 transition-colors cursor-pointer font-sans shadow-sm"
@@ -2472,15 +2619,28 @@ export default function App() {
                                 <span className="text-slate-200 font-semibold">{systemInfo?.start_time || '-'}</span>
                               </div>
 
-                              <a
-                                href="https://github.com/newbietan/FRP-ALL-IN-ONE/releases"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded font-bold text-xs transition-colors flex items-center justify-center gap-2 border border-slate-700 cursor-pointer select-none"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5 text-slate-300" />
-                                {t('查看项目更新', 'View project releases')}
-                              </a>
+                              <div className="flex gap-2 mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUpdateModalOpen(true);
+                                    checkSystemUpdate(true);
+                                  }}
+                                  className="flex-1 px-4 py-2 bg-primary hover:bg-[#005166] text-white rounded font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer select-none shadow-sm"
+                                >
+                                  <RefreshCw className={`w-3.5 h-3.5 ${checkUpdateLoading ? 'animate-spin' : ''}`} />
+                                  {t('在线检查新版本', 'Check for Updates')}
+                                </button>
+                                <a
+                                  href="https://github.com/newbietan/FRP-ALL-IN-ONE/releases"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded font-bold text-xs transition-colors flex items-center justify-center gap-2 border border-slate-700 cursor-pointer select-none"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5 text-slate-300" />
+                                  {t('GitHub 发布页', 'GitHub Releases')}
+                                </a>
+                              </div>
                             </div>
                           </section>
                         </div>
@@ -2746,127 +2906,219 @@ export default function App() {
 
       {/* FORM MODAL HUD GRID FOR ADDING BANDWIDTH TUNNEL CHANNELS */}
       <AnimatePresence>
-        {addTunnelModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 15 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 15 }}
-              className="bg-white w-full max-w-lg rounded-lg border border-border-subtle p-6 flex flex-col gap-4 shadow-lg text-left"
-            >
-              <div className="flex justify-between items-center border-b border-border-subtle pb-3">
-                <h3 className="font-headline font-semibold text-sm uppercase tracking-wider text-on-surface flex items-center gap-2">
-                  <PlusCircle className="w-4 h-4 text-primary" />
-                  新建穿透映射 (FRP Proxy Client Node)
-                </h3>
-                <button 
-                  onClick={() => setAddTunnelModalOpen(false)}
-                  className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+        {addTunnelModalOpen && (() => {
+          const modalSelectedDevice = devices.find(d => d.id === newTunnelData.deviceId) || devices[0];
+          const modalDetectedHostIp = (modalSelectedDevice?.ip && modalSelectedDevice.ip !== '未知') ? modalSelectedDevice.ip : '';
+          const modalCandidateIps = modalSelectedDevice?.ips || (modalDetectedHostIp ? [modalDetectedHostIp] : []);
 
-              <form onSubmit={handleCreateTunnel} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-mono text-outline uppercase font-semibold">绑定目标客户端设备</label>
-                  <select 
-                    className="w-full border border-border-subtle rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary h-[34px] bg-white text-on-surface font-sans"
-                    value={newTunnelData.deviceId}
-                    onChange={(e) => setNewTunnelData(p => ({ ...p, deviceId: e.target.value }))}
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 15 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 15 }}
+                className="bg-white w-full max-w-lg rounded-lg border border-border-subtle p-6 flex flex-col gap-4 shadow-lg text-left"
+              >
+                <div className="flex justify-between items-center border-b border-border-subtle pb-3">
+                  <h3 className="font-headline font-semibold text-sm uppercase tracking-wider text-on-surface flex items-center gap-2">
+                    <PlusCircle className="w-4 h-4 text-primary" />
+                    {t('新建穿透映射 (FRP Proxy Client Node)', 'New FRP Proxy Tunnel')}
+                  </h3>
+                  <button 
+                    onClick={() => setAddTunnelModalOpen(false)}
+                    className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1"
                   >
-                    {devices.map(d => (
-                      <option key={d.id} value={d.id}>{d.name} ({d.ip})</option>
-                    ))}
-                  </select>
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <form onSubmit={handleCreateTunnel} className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-mono text-outline uppercase font-semibold">服务通道名称 (Proxy Name)</label>
-                    <input 
-                      type="text"
-                      className="w-full border border-border-subtle rounded py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary font-mono"
-                      value={newTunnelData.name}
-                      onChange={(e) => setNewTunnelData(p => ({ ...p, name: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-mono text-outline uppercase font-semibold">传输层协议</label>
+                    <label className="text-xs font-mono text-outline uppercase font-semibold">{t('绑定目标客户端设备', 'Target Client Device')}</label>
                     <select 
                       className="w-full border border-border-subtle rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary h-[34px] bg-white text-on-surface font-sans"
-                      value={newTunnelData.type}
-                      onChange={(e) => setNewTunnelData(p => ({ ...p, type: e.target.value as any }))}
+                      value={newTunnelData.deviceId}
+                      onChange={(e) => {
+                        const nextDevId = e.target.value;
+                        const targetDev = devices.find(d => d.id === nextDevId);
+                        const targetIp = (targetDev?.ip && targetDev.ip !== '未知') ? targetDev.ip : '127.0.0.1';
+                        setNewTunnelData(p => ({
+                          ...p,
+                          deviceId: nextDevId,
+                          localIp: (p.localIp === '127.0.0.1' || !p.localIp || devices.some(d => d.ip === p.localIp)) ? targetIp : p.localIp,
+                        }));
+                      }}
                     >
-                      <option value="tcp">TCP</option>
-                      <option value="udp">UDP</option>
-                      <optgroup label={t('域名网站（需合规及额外配置）', 'Websites (filing and extra setup may apply)')}>
-                        <option value="http">HTTP</option>
-                        <option value="https">HTTPS</option>
-                      </optgroup>
+                      {devices.map(d => (
+                        <option key={d.id} value={d.id}>{d.name} {d.ip && d.ip !== '未知' ? `(${d.ip})` : ''}</option>
+                      ))}
                     </select>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-3 gap-3 font-mono text-xs">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-outline uppercase font-semibold">内部局域网 IP</label>
-                    <input 
-                      type="text"
-                      className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={newTunnelData.localIp}
-                      onChange={(e) => setNewTunnelData(p => ({ ...p, localIp: e.target.value }))}
-                      required
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-mono text-outline uppercase font-semibold">{t('服务通道名称 (Proxy Name)', 'Proxy Name')}</label>
+                      <input 
+                        type="text"
+                        className="w-full border border-border-subtle rounded py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                        value={newTunnelData.name}
+                        onChange={(e) => setNewTunnelData(p => ({ ...p, name: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-mono text-outline uppercase font-semibold">{t('传输层协议', 'Protocol')}</label>
+                      <select 
+                        className="w-full border border-border-subtle rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary h-[34px] bg-white text-on-surface font-sans"
+                        value={newTunnelData.type}
+                        onChange={(e) => setNewTunnelData(p => ({ ...p, type: e.target.value as any }))}
+                      >
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                        <optgroup label={t('域名网站（需合规及额外配置）', 'Websites (filing and extra setup may apply)')}>
+                          <option value="http">HTTP</option>
+                          <option value="https">HTTPS</option>
+                        </optgroup>
+                      </select>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-outline uppercase font-semibold">局域网端口</label>
-                    <input 
-                      type="number"
-                      className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={newTunnelData.localPort}
-                      onChange={(e) => setNewTunnelData(p => ({ ...p, localPort: Number(e.target.value) }))}
-                      required
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-outline uppercase font-semibold">服务端映射端口</label>
-                    <input 
-                      type="number"
-                      className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={newTunnelData.remotePort}
-                      onChange={(e) => setNewTunnelData(p => ({ ...p, remotePort: Number(e.target.value) }))}
-                      required
-                    />
-                  </div>
-                </div>
 
-                <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
-                  <button 
-                    type="button"
-                    onClick={() => setAddTunnelModalOpen(false)}
-                    className="px-4 py-2 bg-slate-100 text-on-surface-variant hover:bg-slate-200 text-xs font-semibold rounded cursor-pointer font-sans"
-                  >
-                    取消
-                  </button>
-                  <button 
-                    type="submit"
-                    className="bg-primary hover:bg-[#005166] text-white text-xs font-semibold py-2 px-5 rounded cursor-pointer font-sans"
-                  >
-                    确认创建映射
-                  </button>
-                </div>
-              </form>
+                  <div className="grid grid-cols-3 gap-3 font-mono text-xs">
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-outline uppercase font-semibold">{t('内部局域网 IP', 'Local IP')}</label>
+                        {modalDetectedHostIp && newTunnelData.localIp !== modalDetectedHostIp && (
+                          <button
+                            type="button"
+                            onClick={() => setNewTunnelData(p => ({ ...p, localIp: modalDetectedHostIp }))}
+                            className="text-[10px] text-primary hover:underline font-sans cursor-pointer font-medium"
+                          >
+                            {t('填入宿主机 IP', 'Fill Host IP')}
+                          </button>
+                        )}
+                      </div>
+                      <input 
+                        type="text"
+                        className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        value={newTunnelData.localIp}
+                        onChange={(e) => setNewTunnelData(p => ({ ...p, localIp: e.target.value }))}
+                        placeholder={modalDetectedHostIp || "127.0.0.1"}
+                        required
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-outline uppercase font-semibold">{t('局域网端口', 'Local Port')}</label>
+                      <input 
+                        type="number"
+                        className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        value={newTunnelData.localPort}
+                        onChange={(e) => setNewTunnelData(p => ({ ...p, localPort: Number(e.target.value) }))}
+                        required
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] text-outline uppercase font-semibold">{t('服务端映射端口', 'Remote Port')}</label>
+                      <input 
+                        type="number"
+                        className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        value={newTunnelData.remotePort}
+                        onChange={(e) => setNewTunnelData(p => ({ ...p, remotePort: Number(e.target.value) }))}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* 候选 IP 快捷选择徽章 */}
+                  {modalDetectedHostIp && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-sans -mt-1">
+                      <span className="text-slate-500 text-[10px]">{t('嗅探到宿主机候选 IP:', 'Detected Host Candidate IPs:')}</span>
+                      <button
+                        type="button"
+                        onClick={() => setNewTunnelData(p => ({ ...p, localIp: modalDetectedHostIp }))}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                          newTunnelData.localIp === modalDetectedHostIp
+                            ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                        }`}
+                        title={t('推荐：客户端宿主机实际局域网 IP', 'Recommended: Client host LAN IP')}
+                      >
+                        ★ {modalDetectedHostIp} {t('(宿主机)', '(Host)')}
+                      </button>
+                      {modalCandidateIps.filter(ip => ip !== modalDetectedHostIp && ip !== '127.0.0.1').map(ip => (
+                        <button
+                          key={ip}
+                          type="button"
+                          onClick={() => setNewTunnelData(p => ({ ...p, localIp: ip }))}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                            newTunnelData.localIp === ip
+                              ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
+                              : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          {ip}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 容器网络隔离 127.0.0.1 踩坑提示卡片 */}
+                  {(newTunnelData.localIp === '127.0.0.1' || newTunnelData.localIp === 'localhost') && (
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800 flex flex-col gap-2 font-sans">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="font-semibold text-amber-900 leading-tight">
+                            {t('容器网络提示：127.0.0.1 指向容器自身内部', 'Container Notice: 127.0.0.1 points inside container')}
+                          </p>
+                          <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
+                            {t(
+                              'frp-agent 运行在 Docker 容器中，容器内部通常没有 SSH 等服务。若需转发宿主机服务（如宿主机 SSH、Web 等），请填入宿主机的实际局域网 IP。',
+                              'frp-agent runs inside a container without SSH. To tunnel host services (like host SSH/Web), use the host LAN IP.'
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      {modalDetectedHostIp && (
+                        <div className="flex items-center gap-2 pl-6">
+                          <button
+                            type="button"
+                            onClick={() => setNewTunnelData(p => ({ ...p, localIp: modalDetectedHostIp }))}
+                            className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium px-3 py-1 rounded cursor-pointer transition-colors shadow-sm"
+                          >
+                            {t(`一键填入宿主机 IP (${modalDetectedHostIp})`, `Fill Host IP (${modalDetectedHostIp})`)}
+                          </button>
+                          <span className="text-[10px] text-amber-600 font-semibold">{t('强烈推荐', 'Highly Recommended')}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
+                    <button 
+                      type="button"
+                      onClick={() => setAddTunnelModalOpen(false)}
+                      className="px-4 py-2 bg-slate-100 text-on-surface-variant hover:bg-slate-200 text-xs font-semibold rounded cursor-pointer font-sans"
+                    >
+                      {t('取消', 'Cancel')}
+                    </button>
+                    <button 
+                      type="submit"
+                      className="bg-primary hover:bg-[#005166] text-white text-xs font-semibold py-2 px-5 rounded cursor-pointer font-sans"
+                    >
+                      {t('确认创建映射', 'Confirm Mapping')}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* REALTIME LOG WINDOW MODAL DISPLAYER FRAME */}
@@ -2957,6 +3209,277 @@ export default function App() {
                   <span>{t(`共 ${liveLogs.length} 条日志记录`, `Total logs: ${liveLogs.length}`)}</span>
                 </div>
                 <span>{t('最后更新: 刚刚', 'Last updated: just now')}</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* SYSTEM UPDATE MODAL */}
+      <AnimatePresence>
+        {updateModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white w-full max-w-2xl rounded-xl border border-border-subtle p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[85vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center border-b border-border-subtle pb-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  <h3 className="font-headline font-bold text-base text-on-surface">
+                    {t('系统版本与自动升级中心', 'Version & Auto-Update Center')}
+                  </h3>
+                </div>
+                <button 
+                  onClick={() => setUpdateModalOpen(false)}
+                  className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1 rounded hover:bg-slate-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Status card */}
+              <div className={`p-4 rounded-lg border flex items-center justify-between ${
+                updateInfo?.has_update 
+                  ? 'bg-amber-50/70 border-amber-300 text-amber-900' 
+                  : 'bg-emerald-50/70 border-emerald-300 text-emerald-900'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${updateInfo?.has_update ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                  <div>
+                    <p className="font-semibold text-sm">
+                      {updateInfo?.has_update
+                        ? t(`发现新版本 ${updateInfo.latest_version}（当前: ${APP_VERSION_DISPLAY}）`, `New version ${updateInfo.latest_version} available (Current: ${APP_VERSION_DISPLAY})`)
+                        : t(`当前已是最新版本 (${APP_VERSION_DISPLAY})`, `System is up to date (${APP_VERSION_DISPLAY})`)}
+                    </p>
+                    <p className="text-xs opacity-75 mt-0.5">
+                      {t('上一次检测时间: ', 'Last checked: ')}
+                      {updateInfo?.checked_at ? new Date(updateInfo.checked_at * 1000).toLocaleString() : t('刚刚', 'Just now')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => checkSystemUpdate(true)}
+                  disabled={checkUpdateLoading}
+                  className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold cursor-pointer flex items-center gap-1.5 shadow-sm text-slate-700"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${checkUpdateLoading ? 'animate-spin' : ''}`} />
+                  <span>{t('重新检测', 'Re-check')}</span>
+                </button>
+              </div>
+
+              {/* Release Notes */}
+              {updateInfo?.release_notes && (
+                <div className="flex flex-col gap-1.5">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-mono">
+                    {t('更新日志 (Release Notes)', 'Release Notes')}
+                  </h4>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 text-xs text-slate-700 max-h-48 overflow-y-auto font-mono whitespace-pre-wrap leading-relaxed">
+                    {updateInfo.release_notes}
+                  </div>
+                </div>
+              )}
+
+              {/* Server Upgrade Guide */}
+              <div className="flex flex-col gap-2 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 font-mono">
+                    {t('① 服务端一键平滑升级指令', 'Server One-Click Upgrade Command')}
+                  </span>
+                  <span className="text-[10px] text-slate-500">{t('数据自动保留，零丢失', 'Data safely preserved')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
+                    curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | bash
+                  </code>
+                  <button
+                    onClick={() => handleCopyText('curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | bash')}
+                    className="px-3 py-2 bg-primary hover:bg-[#005166] text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>{t('复制', 'Copy')}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Outdated Clients Summary */}
+              <div className="flex flex-col gap-2 bg-sky-50/60 border border-sky-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-sky-900 font-mono">
+                      {t('② 客户端设备升级情况', 'Client Devices Update Status')}
+                    </span>
+                    <p className="text-[11px] text-sky-700 mt-0.5">
+                      {t(`共连接 ${devices.length} 台设备，其中 ${outdatedDevices.length} 台可升级`, `${devices.length} devices total, ${outdatedDevices.length} can be upgraded`)}
+                    </p>
+                  </div>
+                  {outdatedDevices.length > 0 && (
+                    <button
+                      onClick={handleBatchUpgradeAgents}
+                      disabled={batchUpgrading}
+                      className="px-3 py-1.5 bg-[#006782] hover:bg-[#005166] text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{batchUpgrading ? t('正在下发...', 'Sending...') : t('批量下发升级信号', 'Broadcast Upgrade')}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Watchtower Zero-Touch Tip */}
+              <div className="bg-slate-100 border border-slate-200 rounded p-3 text-[11px] text-slate-600 flex items-start gap-2">
+                <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-semibold text-slate-800">{t('全自动零感知升级 (Watchtower): ', 'Zero-Touch Automatic Upgrade: ')}</span>
+                  {t(
+                    '服务端 compose.yml 及客户端容器已预先打上 Watchtower 标签。如需全自动静默升级，只需在服务端执行 docker compose --profile auto-update up -d，每次云端镜像推送后将在后台平滑更新。',
+                    'Watchtower labels are pre-configured. Run docker compose --profile auto-update up -d for silent background updates.'
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-border-subtle pt-3">
+                <button
+                  onClick={() => setUpdateModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded cursor-pointer"
+                >
+                  {t('关闭', 'Close')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* INDIVIDUAL CLIENT DEVICE UPGRADE MODAL */}
+      <AnimatePresence>
+        {upgradeTargetDevice && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white w-full max-w-lg rounded-xl border border-border-subtle p-6 flex flex-col gap-4 shadow-2xl text-left"
+            >
+              <div className="flex justify-between items-center border-b border-border-subtle pb-3">
+                <div className="flex items-center gap-2">
+                  <ArrowUpCircle className="w-5 h-5 text-primary" />
+                  <h3 className="font-headline font-bold text-sm text-on-surface">
+                    {t(`升级客户端设备: ${upgradeTargetDevice.name}`, `Upgrade Client: ${upgradeTargetDevice.name}`)}
+                  </h3>
+                </div>
+                <button 
+                  onClick={() => setUpgradeTargetDevice(null)}
+                  className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1 rounded hover:bg-slate-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 grid grid-cols-2 gap-2 text-xs font-mono">
+                <div>
+                  <span className="text-slate-400">{t('当前版本: ', 'Current: ')}</span>
+                  <span className="font-semibold text-slate-800">
+                    {upgradeTargetDevice.agentInfo?.agent_version ? `v${upgradeTargetDevice.agentInfo.agent_version}` : 'v3.0.0'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400">{t('目标版本: ', 'Target: ')}</span>
+                  <span className="font-semibold text-emerald-600">
+                    {upgradeTargetDevice.latestVersion || APP_VERSION_DISPLAY}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400">{t('宿主机 IP: ', 'Host IP: ')}</span>
+                  <span className="font-semibold text-slate-800">{upgradeTargetDevice.ip}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">{t('运行环境: ', 'Platform: ')}</span>
+                  <span className="font-semibold text-slate-800 capitalize">{upgradeTargetDevice.os}</span>
+                </div>
+              </div>
+
+              {/* Method 1: Remote Signal */}
+              <div className="flex flex-col gap-2 p-3 bg-sky-50/70 border border-sky-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-sky-900 font-mono">
+                    {t('方式一：在线下发升级信号', 'Method 1: Remote Signal')}
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${upgradeTargetDevice.status === 'online' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                    {upgradeTargetDevice.status === 'online' ? t('在线', 'Online') : t('离线', 'Offline')}
+                  </span>
+                </div>
+                <p className="text-[11px] text-sky-700">
+                  {t('通过 WebSocket 向正在运行的 Agent 容器发送更新请求', 'Send update signal over WebSocket to the running agent')}
+                </p>
+                <button
+                  onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
+                  disabled={upgradingDevice || upgradeTargetDevice.status !== 'online'}
+                  className={`w-full py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    upgradeTargetDevice.status === 'online'
+                      ? 'bg-primary hover:bg-[#005166] text-white'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{upgradingDevice ? t('下发中...', 'Sending...') : t('发送远程升级信号', 'Send Upgrade Signal')}</span>
+                </button>
+              </div>
+
+              {/* Method 2: Host One-Click Command */}
+              <div className="flex flex-col gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <span className="text-xs font-bold text-slate-800 font-mono">
+                  {t('方式二：在客户端设备执行一键升级命令', 'Method 2: Run Command on Host')}
+                </span>
+                <p className="text-[11px] text-slate-500">
+                  {t('自动拉取腾讯云最新镜像并平滑重建容器，客户端 ID 与 Token 自动继承保留', 'Pulls latest image and recreates container, preserving Client ID & Token')}
+                </p>
+                {(() => {
+                  const osType = upgradeTargetDevice.os;
+                  const clientId = upgradeTargetDevice.id;
+                  const origin = window.location.origin;
+                  const cmd = osType === 'windows'
+                    ? `& ([scriptblock]::Create((Invoke-RestMethod '${origin}/api/frp/agent/install-script/windows?client_id=${clientId}')))`
+                    : osType === 'macos'
+                    ? `curl -fsSL '${origin}/api/frp/agent/install-script/darwin?client_id=${clientId}' | bash`
+                    : `curl -fsSL '${origin}/api/frp/agent/install-script/linux?client_id=${clientId}' | sudo bash`;
+
+                  return (
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
+                        {cmd}
+                      </code>
+                      <button
+                        onClick={() => handleCopyText(cmd)}
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>{t('复制', 'Copy')}</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-border-subtle pt-3">
+                <button
+                  onClick={() => setUpgradeTargetDevice(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded cursor-pointer"
+                >
+                  {t('关闭', 'Close')}
+                </button>
               </div>
             </motion.div>
           </motion.div>

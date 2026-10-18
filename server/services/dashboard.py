@@ -53,11 +53,17 @@ def build_full_sync_data(db) -> dict:
                 "arch": agent_info_db.arch,
                 "platform": agent_info_db.platform,
                 "agent_version": agent_info_db.agent_version,
+                "ip": agent_info_db.ip,
+                "ips": agent_info_db.ips,
             })
         is_ws_connected = ws_manager.is_agent_online(c.id)
         ws_info = ws_agents_info.get(c.id, {})
+        resolved_ip = ws_info.get("ip") or client_data.get("ip")
+        resolved_ips = ws_info.get("ips") or client_data.get("ips")
         client_data.update({
             "is_online": is_ws_connected,
+            "ip": resolved_ip,
+            "ips": resolved_ips,
             "cpu_percent":    ws_info.get("cpu_percent"),
             "memory_percent": ws_info.get("memory_percent"),
             "memory_used":    ws_info.get("memory_used"),
@@ -69,7 +75,25 @@ def build_full_sync_data(db) -> dict:
             "net_bytes_out":  ws_info.get("net_bytes_out"),
             "net_speed_in":   ws_info.get("net_speed_in"),
             "net_speed_out":  ws_info.get("net_speed_out"),
+            "agent_info": {
+                "hostname": client_data.get("hostname") or c.name,
+                "os": client_data.get("os"),
+                "arch": client_data.get("arch"),
+                "platform": client_data.get("platform"),
+                "agent_version": client_data.get("agent_version"),
+                "ip": resolved_ip,
+                "ips": resolved_ips,
+                "online": is_ws_connected,
+                **ws_info,
+            }
         })
+        agent_ver = client_data.get("agent_version") or ""
+        current_server_ver = f"v{models.APP_VERSION}"
+        has_update = models.is_newer_version(current_server_ver, agent_ver) if agent_ver else False
+        client_data["has_update"] = has_update
+        client_data["latest_version"] = current_server_ver
+        client_data["agent_info"]["has_update"] = has_update
+        client_data["agent_info"]["latest_version"] = current_server_ver
         registered_clients.append(client_data)
 
     disabled_ports_str = crud.get_config(db, models.ConfigKeys.DISABLED_PORTS) or ""

@@ -17,12 +17,15 @@ export interface Device {
   name: string;
   os: OS;
   ip: string;
+  ips?: string[];
   status: 'online' | 'offline';
   lastSeen: string;
   tunnelsCount: number;
   cpuUsage: number;
   memUsage: number;
   arch?: string;
+  hasUpdate?: boolean;
+  latestVersion?: string;
   uploadRate?: string;
   downloadRate?: string;
   totalTraffic?: string;
@@ -33,6 +36,10 @@ export interface Device {
     platform?: string;
     platform_version?: string;
     agent_version?: string;
+    has_update?: boolean;
+    latest_version?: string;
+    ip?: string;
+    ips?: string[];
     cpu_percent?: number;
     memory_percent?: number;
     memory_used?: number;

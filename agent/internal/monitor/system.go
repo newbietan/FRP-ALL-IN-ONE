@@ -15,23 +15,25 @@ import (
 
 // SystemInfo 系统信息
 type SystemInfo struct {
-	Timestamp   int64   `json:"timestamp"`
-	Hostname    string  `json:"hostname"`
-	OS          string  `json:"os"`
-	Arch        string  `json:"arch"`
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemoryUsed  uint64  `json:"memory_used"`
-	MemoryTotal uint64  `json:"memory_total"`
-	MemoryPercent float64 `json:"memory_percent"`
-	DiskUsed    uint64  `json:"disk_used"`
-	DiskTotal   uint64  `json:"disk_total"`
-	DiskPercent float64 `json:"disk_percent"`
-	NetBytesIn  uint64  `json:"net_bytes_in"`
-	NetBytesOut uint64  `json:"net_bytes_out"`
+	Timestamp     int64    `json:"timestamp"`
+	Hostname      string   `json:"hostname"`
+	OS            string   `json:"os"`
+	Arch          string   `json:"arch"`
+	IP            string   `json:"ip"`
+	IPs           []string `json:"ips"`
+	CPUPercent    float64  `json:"cpu_percent"`
+	MemoryUsed    uint64   `json:"memory_used"`
+	MemoryTotal   uint64   `json:"memory_total"`
+	MemoryPercent float64  `json:"memory_percent"`
+	DiskUsed      uint64   `json:"disk_used"`
+	DiskTotal     uint64   `json:"disk_total"`
+	DiskPercent   float64  `json:"disk_percent"`
+	NetBytesIn    uint64   `json:"net_bytes_in"`
+	NetBytesOut   uint64   `json:"net_bytes_out"`
 	// 实时网络速率（字节/秒）
-	NetSpeedIn  uint64  `json:"net_speed_in"`
-	NetSpeedOut uint64  `json:"net_speed_out"`
-	Uptime      uint64  `json:"uptime"`
+	NetSpeedIn  uint64 `json:"net_speed_in"`
+	NetSpeedOut uint64 `json:"net_speed_out"`
+	Uptime      uint64 `json:"uptime"`
 }
 
 // Monitor 系统监控器
@@ -114,10 +116,10 @@ func (m *Monitor) Collect() (SystemInfo, error) {
 	if err == nil && len(netInfo) > 0 {
 		currentNetIn := netInfo[0].BytesRecv
 		currentNetOut := netInfo[0].BytesSent
-		
+
 		info.NetBytesIn = currentNetIn
 		info.NetBytesOut = currentNetOut
-		
+
 		// 计算网络速率（字节/秒）
 		if m.initialized {
 			elapsed := time.Since(m.lastCollect).Seconds()
@@ -131,13 +133,18 @@ func (m *Monitor) Collect() (SystemInfo, error) {
 				}
 			}
 		}
-		
+
 		// 更新上次采集的值
 		m.lastNetIn = currentNetIn
 		m.lastNetOut = currentNetOut
 		m.lastCollect = time.Now()
 		m.initialized = true
 	}
+
+	// 探测宿主机/局域网 IP
+	primaryIP, candidateIPs := DetectHostIP()
+	info.IP = primaryIP
+	info.IPs = candidateIPs
 
 	return info, nil
 }
