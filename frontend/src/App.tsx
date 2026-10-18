@@ -285,7 +285,26 @@ export default function App() {
   // ===========================
   // 检查系统状态并跳转到对应页面，同时预加载公网 IP
   const checkSystemAndNavigate = async () => {
-    // 并行获取系统状态和公网 IP
+    // 1. 如果已有 Token，先验证 Token 是否合法有效（防止历史残留无效 Token）
+    if (isLoggedIn()) {
+      try {
+        const profile = await authApi.getProfile();
+        setUserProfile(profile);
+      } catch (_err) {
+        void _err;
+        // Token 无效或已过期（系统重新部署或密钥变更导致历史 Token 失效）
+        clearToken();
+        setUserProfile(null);
+        changeScreen(Screen.LOGIN, 'none');
+        triggerToast(t('登录凭据已失效或系统已重新部署，请重新登录', 'Session expired or system was redeployed. Please login again.'), 'warning');
+        return;
+      }
+    } else {
+      changeScreen(Screen.LOGIN, 'none');
+      return;
+    }
+
+    // 2. Token 有效，并行获取系统状态和公网 IP
     const [status, ipResult] = await Promise.allSettled([
       systemApi.getStatus(),
       systemApi.getPublicIp(),
@@ -297,7 +316,7 @@ export default function App() {
       setInputIp(ipResult.value.ip);
     }
 
-    // 处理系统状态结果
+    // 3. 处理系统状态结果
     const deployed = status.status === 'fulfilled' && status.value.frps_deployed;
     if (!deployed) {
       changeScreen(Screen.INIT_CHOOSE_MODE, 'push');
@@ -712,6 +731,13 @@ export default function App() {
         triggerToast(`部署失败: ${(result as any).message}`, 'warning');
       }
     } catch (err: any) {
+      if (err.status === 401 || err.status === 403) {
+        clearToken();
+        setUserProfile(null);
+        changeScreen(Screen.LOGIN, 'push_back');
+        triggerToast(t('登录凭据已失效或系统已重置，请重新登录', 'Session expired or system was redeployed. Please login again.'), 'warning');
+        return;
+      }
       triggerToast(`部署失败: ${err.message}`, 'warning');
     }
   };
@@ -1071,11 +1097,7 @@ export default function App() {
                 <div className="w-full flex flex-col gap-3">
                   <button
                     onClick={() => {
-                      if (isLoggedIn()) {
-                        checkSystemAndNavigate();
-                      } else {
-                        authApi.loginWithGitHub();
-                      }
+                      authApi.loginWithGitHub();
                     }}
                     className="w-full bg-github-dark text-white flex items-center justify-center gap-3 py-3 px-4 hover:opacity-90 transition-opacity font-medium text-sm rounded cursor-pointer"
                   >

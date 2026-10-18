@@ -44,6 +44,9 @@ async function request<T = any>(
 
   const res = await fetch(`${API_BASE}${url}`, init);
   if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+    }
     let detail = '';
     try {
       const d = await res.json();
