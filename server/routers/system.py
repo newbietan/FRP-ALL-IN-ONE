@@ -138,9 +138,7 @@ async def trigger_system_upgrade(
 
 
 @router.get("/upgrade/status")
-async def get_system_upgrade_status(
-    current_user: models.Admin = Depends(get_current_user)
-):
+async def get_system_upgrade_status():
     """获取服务端自升级能力与当前状态"""
     from services import self_updater
     return self_updater.get_upgrade_status()

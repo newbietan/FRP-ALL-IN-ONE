@@ -14,14 +14,29 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-if [ -f "$PWD/compose.yml" ]; then
-    SCRIPT_DIR="$PWD"
-elif [ -f "$PWD/deploy/compose.yml" ]; then
-    SCRIPT_DIR="$PWD/deploy"
-elif [ -d "/opt/frp-all-in-one" ]; then
-    SCRIPT_DIR="/opt/frp-all-in-one"
-else
-    SCRIPT_DIR="$PWD"
+SCRIPT_DIR=""
+# 智能嗅探正在运行的 frp-server 容器的真实宿主机工作目录
+if command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; then
+    DETECT_CLI=$(command -v docker 2>/dev/null || command -v podman 2>/dev/null)
+    HOST_DATA_DIR=$($DETECT_CLI inspect --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' frp-server 2>/dev/null || true)
+    if [ -n "$HOST_DATA_DIR" ] && [ -d "$HOST_DATA_DIR" ]; then
+        PARENT_DIR=$(dirname "$HOST_DATA_DIR")
+        if [ -f "$PARENT_DIR/compose.yml" ]; then
+            SCRIPT_DIR="$PARENT_DIR"
+        fi
+    fi
+fi
+
+if [ -z "$SCRIPT_DIR" ]; then
+    if [ -f "$PWD/compose.yml" ]; then
+        SCRIPT_DIR="$PWD"
+    elif [ -f "$PWD/deploy/compose.yml" ]; then
+        SCRIPT_DIR="$PWD/deploy"
+    elif [ -d "/opt/frp-all-in-one" ]; then
+        SCRIPT_DIR="/opt/frp-all-in-one"
+    else
+        SCRIPT_DIR="$PWD"
+    fi
 fi
 
 cd "$SCRIPT_DIR"
