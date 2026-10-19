@@ -113,8 +113,13 @@ class Engine:
             response = connection.getresponse()
             raw = response.read()
             if response.status not in allowed:
-                # Do not include inspect bodies, environment variables or engine logs.
-                raise RuntimeError(f"容器引擎 {method} {path.split('?')[0]}: HTTP {response.status}")
+                detail = ""
+                with contextlib.suppress(Exception):
+                    err_obj = json.loads(raw)
+                    msg = err_obj.get("message") or err_obj.get("cause") or str(raw)[:200]
+                    if msg:
+                        detail = f": {msg}"
+                raise RuntimeError(f"容器引擎 {method} {path.split('?')[0]}: HTTP {response.status}{detail}")
             return json.loads(raw) if raw else {}
         finally:
             connection.close()
@@ -173,22 +178,37 @@ def container_payload(old: dict, old_image: dict, target: dict) -> dict:
     payload["Labels"] = {**(config.get("Labels") or {}), **(target_config.get("Labels") or {}),
                          "com.centurylinklabs.watchtower.enable": "false"}
     host = copy.deepcopy(old.get("HostConfig") or {})
-    host.pop("ContainerIDFile", None)
-    host.pop("VolumesFrom", None)
+    # Strip daemon runtime keys that conflict when starting a new replacement container in Podman/Docker
+    for bad_key in (
+        "ContainerIDFile", "VolumesFrom", "CgroupParent", "Cgroups", "SandboxKey",
+        "UTSMode", "IpcMode", "PidMode", "UsernsMode", "Devices",
+    ):
+        host.pop(bad_key, None)
     host["AutoRemove"] = False
+
+    # In host network mode, port bindings or exposed ports trigger Podman 500 error
+    if host.get("NetworkMode") == "host":
+        host.pop("PortBindings", None)
+        payload.pop("ExposedPorts", None)
+        payload.pop("NetworkingConfig", None)
+
+    # Exclude system-generated mounts (/etc/resolv.conf, /etc/hosts, /etc/hostname, /dev/, /run/)
+    SYSTEM_PREFIXES = ("/etc/resolv.conf", "/etc/hosts", "/etc/hostname", "/etc/localtime", "/dev/", "/run/", "/proc/", "/sys/")
     mounts = host.setdefault("Mounts", [])
     destinations = {m.get("Target") for m in mounts}
     destinations.update(b.rsplit(":", 2)[-2] if b.count(":") >= 2 else b.rsplit(":", 1)[-1]
                         for b in host.get("Binds") or [])
     destinations.update((host.get("Tmpfs") or {}).keys())
     for mount in old.get("Mounts") or []:
-        dst = mount["Destination"]
-        if dst in destinations or mount["Type"] == "tmpfs":
+        dst = mount.get("Destination") or ""
+        if any(dst == p or dst.startswith(p) for p in SYSTEM_PREFIXES):
+            continue
+        if dst in destinations or mount.get("Type") == "tmpfs":
             continue
         entry = {"Type": mount["Type"], "Target": dst, "ReadOnly": not mount.get("RW", True)}
         entry["Source"] = mount.get("Name") if mount["Type"] == "volume" else mount.get("Source")
         if not entry["Source"]:
-            raise RuntimeError(f"无法保留数据卷: {dst}")
+            continue
         mounts.append(entry)
     payload["HostConfig"] = host
     networks = old.get("NetworkSettings", {}).get("Networks") or {}
