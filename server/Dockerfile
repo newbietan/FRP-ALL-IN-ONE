@@ -4,6 +4,8 @@
 
 # ---- 阶段 1: 编译前端 React 静态资源 ----
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
+ARG VITE_APP_VERSION
+ENV VITE_APP_VERSION=${VITE_APP_VERSION}
 WORKDIR /build
 COPY frontend/package*.json ./
 RUN npm ci
@@ -21,6 +23,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 
 # ---- 阶段 3: Python 运行环境与整体组装 ----
 FROM python:3.11-slim
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
 
 # 安装必要系统工具
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \

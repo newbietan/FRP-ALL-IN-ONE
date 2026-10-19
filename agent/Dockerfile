@@ -6,6 +6,7 @@ FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG AGENT_VERSION
 
 WORKDIR /build
 
@@ -18,7 +19,8 @@ COPY agent/ /build/agent/
 WORKDIR /build/agent
 
 # 静态多架构交叉编译客户端 Agent (利用 Go 原生跨平台交叉编译)
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /build/frp-agent ./cmd/frp-agent
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -ldflags="-s -w -X main.version=${AGENT_VERSION:-3.2.5}" -o /build/frp-agent ./cmd/frp-agent
 
 # ==============================================================================
 # 运行时镜像：极简 Alpine（~20MB，非 Root 安全运行）

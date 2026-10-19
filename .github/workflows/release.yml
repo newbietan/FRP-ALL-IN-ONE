@@ -1,0 +1,282 @@
+# ============================================================
+# FRP-ALL-IN-ONE - 统一自动化发布与多架构镜像构建流水线
+# ============================================================
+# 特性：
+#   1. 版本号自动递增（Patch），无需手动发布；支持手动指定版本号
+#   2. 仅发布规范的语义化标签 Releases (如 v3.2.6)，彻底废弃日期哈希标签
+#   3. 全自动编译 5 大平台客户端 Agent 二进制并发布至 GitHub Releases
+#   4. 全自动构建 linux/amd64 与 linux/arm64 双架构容器镜像并推送到腾讯云 TCR
+# ============================================================
+
+name: Release & Multi-Arch Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '指定发布版本号 (如 v3.3.0，留空则自动递增 Patch 版本)'
+        required: false
+        default: ''
+  push:
+    branches:
+      - main
+    paths:
+      - 'server/**'
+      - 'frontend/**'
+      - 'agent/**'
+      - 'core/**'
+      - 'deploy/**'
+      - '.github/workflows/release.yml'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  REGISTRY: sgccr.ccs.tencentyun.com
+  NAMESPACE: frp-all-in-one
+  SERVER_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server
+  AGENT_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent
+  GO_VERSION: '1.26'
+
+jobs:
+  # ===========================
+  # 阶段 1: 确定版本号（自动递增或手动指定）
+  # ===========================
+  resolve-version:
+    name: Resolve Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      version_num: ${{ steps.version.outputs.VERSION_NUM }}
+      should_release: ${{ steps.version.outputs.SHOULD_RELEASE }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate next semantic version
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if [[ "$COMMIT_MSG" =~ \[skip\ ci\] ]] && \
+             [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "SHOULD_RELEASE=false" >> "$GITHUB_OUTPUT"
+            echo ">> Commit contains [skip ci], skipping release."
+            exit 0
+          fi
+          echo "SHOULD_RELEASE=true" >> "$GITHUB_OUTPUT"
+
+          MANUAL_VER="$INPUT_VERSION"
+          if [ -n "$MANUAL_VER" ]; then
+            VERSION="v${MANUAL_VER#v}"
+            echo ">> 使用手动指定版本: ${VERSION}"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            VERSION="$REF_NAME"
+            echo ">> 使用推送的标签: ${VERSION}"
+          else
+            git fetch --tags --force 2>/dev/null || true
+            LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" \
+              --sort=-v:refname | head -n 1)
+            if [ -z "$LATEST_TAG" ]; then
+              LATEST_TAG="v3.2.5"
+            fi
+            echo ">> 检测到最新语义化标签: ${LATEST_TAG}"
+
+            VER_NUM="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VER_NUM"
+            NEXT_PATCH=$((PATCH + 1))
+            VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            echo ">> 自动递增版本为: ${VERSION}"
+          fi
+
+          SEMVER_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
+          if [[ ! "$VERSION" =~ $SEMVER_REGEX ]]; then
+            echo "::error::非法版本号格式: ${VERSION}"
+            exit 1
+          fi
+
+          VERSION_NUM="${VERSION#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "VERSION_NUM=${VERSION_NUM}" >> "$GITHUB_OUTPUT"
+          echo ">> 最终生效版本: ${VERSION} (纯数字: ${VERSION_NUM})"
+
+  # ===========================
+  # 阶段 2: 编译 Agent 客户端全平台二进制并发布 GitHub Release
+  # ===========================
+  release-agent:
+    name: Build & Release Agent (${{ needs.resolve-version.outputs.version }})
+    needs: resolve-version
+    if: needs.resolve-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: agent/go.sum
+
+      - name: Run tests
+        working-directory: ./agent
+        run: set -euo pipefail && go test ./...
+
+      - name: Build cross-platform binaries
+        working-directory: ./agent
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          VER_NUM="${{ needs.resolve-version.outputs.version_num }}"
+          BT=$(date +%Y-%m-%d_%H:%M:%S)
+          LDFLAGS="-s -w -X main.version=${VER_NUM} -X main.buildTime=${BT}"
+          mkdir -p dist
+
+          TARGETS=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+          for TARGET in "${TARGETS[@]}"; do
+            set -- $TARGET
+            OS=$1; ARCH=$2
+            EXT=""; [ "$OS" = "windows" ] && EXT=".exe"
+            OUT="dist/frp-agent-${OS}-${ARCH}${EXT}"
+            echo "Building ${OS}-${ARCH}..."
+            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build \
+              -trimpath -buildvcs=false \
+              -ldflags "$LDFLAGS" \
+              -o "$OUT" ./cmd/frp-agent
+          done
+
+          ls -la dist/
+
+      - name: Generate checksums
+        working-directory: ./agent/dist
+        run: sha256sum frp-agent-* > SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-version.outputs.version }}
+          name: FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
+          body: |
+            ## FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
+
+            ### 客户端 Agent 二进制直链下载：
+            | 文件名 | 平台架构 | 说明 |
+            | :--- | :--- | :--- |
+            | `frp-agent-linux-amd64` | Linux x64 | 适用于主流 Linux |
+            | `frp-agent-linux-arm64` | Linux ARM64 | 适用于 ARM 服务器 |
+            | `frp-agent-darwin-amd64` | macOS Intel | 适用于 Intel Mac |
+            | `frp-agent-darwin-arm64` | macOS Apple Silicon | 适用于 Apple M 芯片 |
+            | `frp-agent-windows-amd64.exe` | Windows x64 | 适用于 Windows |
+
+            ### 容器镜像已同步发布至腾讯云 TCR (双架构)：
+            - 服务端: `frp-server:${{ needs.resolve-version.outputs.version }}`
+            - 客户端: `frp-agent:${{ needs.resolve-version.outputs.version }}`
+          files: |
+            agent/dist/frp-agent-linux-amd64
+            agent/dist/frp-agent-linux-arm64
+            agent/dist/frp-agent-darwin-amd64
+            agent/dist/frp-agent-darwin-arm64
+            agent/dist/frp-agent-windows-amd64.exe
+            agent/dist/SHA256SUMS
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================
+  # 阶段 3: 构建并推送多架构容器镜像至腾讯云 TCR
+  # ===========================
+  build-and-push-docker:
+    name: Build & Push Docker
+    needs: [resolve-version, release-agent]
+    if: needs.resolve-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Tencent TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Build & Push Server Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ needs.resolve-version.outputs.version_num }}
+            VITE_APP_VERSION=${{ needs.resolve-version.outputs.version }}
+          tags: |
+            ${{ env.SERVER_IMAGE }}:${{ needs.resolve-version.outputs.version }}
+            ${{ env.SERVER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push Agent Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: agent/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            AGENT_VERSION=${{ needs.resolve-version.outputs.version_num }}
+          tags: |
+            ${{ env.AGENT_IMAGE }}:${{ needs.resolve-version.outputs.version }}
+            ${{ env.AGENT_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================
+  # 阶段 4: 验证镜像公开匿名可拉取性
+  # ===========================
+  verify-public-images:
+    name: Verify Public Images (${{ matrix.image }})
+    needs: [resolve-version, build-and-push-docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [frp-server, frp-agent]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Pull images without credentials
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          IMAGE_TAG: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          image="$REGISTRY/$NAMESPACE/$IMAGE_NAME"
+          images=("$image:$IMAGE_TAG" "$image:latest")
+          bash deploy/check-public-images.sh "${images[@]}"
