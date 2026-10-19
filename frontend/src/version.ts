@@ -9,7 +9,7 @@
 export const APP_VERSION: string =
   (import.meta as any).env?.VITE_APP_VERSION ||
   (import.meta as any).env?.VITE_APP_VERSION_NAME ||
-  'v3.2.3';
+  'v3.2.4';
 
 /** 格式化显示版本（如 "V2.4.0-Stable"） */
 export const APP_VERSION_DISPLAY = `V${APP_VERSION.replace(/^v/i, '')}`;
