@@ -329,6 +329,8 @@ export const systemApi = {
   /** 获取系统运行信息 */
   getInfo() {
     return request<{
+      app_version?: string;
+      server_start_time?: number;
       uptime_seconds: number;
       uptime_display: string;
       start_time: string;

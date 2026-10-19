@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -133,17 +134,33 @@ async def trigger_self_upgrade() -> dict[str, Any]:
                 _upgrade_status["message"] = "正在读取当前运行环境配置..."
 
                 # 3. 检查当前容器配置
-                container_name = "frp-server"
-                inspect_res = await client.get(f"/containers/{container_name}/json")
+                container_id = os.environ.get("HOSTNAME") or "frp-server"
+                inspect_res = await client.get(f"/containers/{container_id}/json")
+                if inspect_res.status_code != 200:
+                    inspect_res = await client.get("/containers/frp-server/json")
                 if inspect_res.status_code != 200:
                     raise RuntimeError(f"未能获取当前容器配置: HTTP {inspect_res.status_code}")
 
                 container_data = inspect_res.json()
+                container_name = container_data.get("Name", "/frp-server").lstrip("/")
                 config = container_data.get("Config", {})
                 host_config = container_data.get("HostConfig", {})
 
                 # 构造新容器的参数（与原容器保持完全一致的数据卷挂载、网络、环境变量）
-                binds = host_config.get("Binds") or ["./data:/app/data", f"{sock_path}:/var/run/docker.sock"]
+                binds = host_config.get("Binds") or []
+                if not binds:
+                    for m in container_data.get("Mounts", []):
+                        src = m.get("Source")
+                        dst = m.get("Destination")
+                        mode = m.get("Mode", "rw")
+                        if src and dst:
+                            binds.append(f"{src}:{dst}:{mode}" if mode else f"{src}:{dst}")
+
+                # 确保宿主机 docker.sock 在挂载列表中
+                sock_mount = f"{sock_path}:/var/run/docker.sock"
+                if not any("/var/run/docker.sock" in b for b in binds):
+                    binds.append(sock_mount)
+
                 env = config.get("Env") or []
                 network_mode = host_config.get("NetworkMode") or "host"
                 restart_policy = host_config.get("RestartPolicy") or {"Name": "always"}
@@ -160,19 +177,35 @@ async def trigger_self_upgrade() -> dict[str, Any]:
                     },
                 }
 
+                payload_b64 = base64.b64encode(json.dumps(new_container_payload).encode("utf-8")).decode("ascii")
+
                 _upgrade_status["step"] = "restarting"
                 _upgrade_status["message"] = "正在启动服务热交接切换（服务即将平滑重启，约 5~15 秒就绪）..."
 
-                # 4. 创建瞬时 Helper 容器执行交接切换
+                # 4. 创建瞬时 Helper 容器执行交接切换 (通过 Base64 传递避免转义错误，force 强制删除旧容器)
                 helper_script = (
-                    "import time, httpx; "
+                    "import base64, json, sys, time, httpx; "
                     "time.sleep(2.0); "
-                    f"c = httpx.Client(transport=httpx.HTTPTransport(uds='{sock_path}'), base_url='http://docker', timeout=120.0); "
-                    "try: c.post('/containers/frp-server/stop', params={'t': 10}); except: pass; "
-                    "try: c.delete('/containers/frp-server'); except: pass; "
-                    f"res = c.post('/containers/create', params={{'name': 'frp-server'}}, json={json.dumps(new_container_payload)}); "
-                    "if res.status_code in (200, 201): c.post('/containers/frp-server/start'); "
-                    "print('SWAP_DONE')"
+                    f"sock = '{sock_path}'; "
+                    "c = httpx.Client(transport=httpx.HTTPTransport(uds=sock), base_url='http://docker', timeout=120.0); "
+                    f"name = '{container_name}'; "
+                    "for _ in range(10):\n"
+                    "    try:\n"
+                    "        del_res = c.delete(f'/containers/{name}', params={'force': True, 'v': False})\n"
+                    "        if del_res.status_code in (200, 204, 404):\n"
+                    "            break\n"
+                    "    except Exception:\n"
+                    "        pass\n"
+                    "    time.sleep(1.0)\n"
+                    f"raw = base64.b64decode('{payload_b64}').decode('utf-8'); "
+                    "payload = json.loads(raw); "
+                    "create_res = c.post('/containers/create', params={'name': name}, json=payload); "
+                    "if create_res.status_code not in (200, 201):\n"
+                    "    sys.exit(1)\n"
+                    "start_res = c.post(f'/containers/{name}/start'); "
+                    "if start_res.status_code not in (200, 204):\n"
+                    "    sys.exit(1)\n"
+                    "print('SWAP_SUCCESS')"
                 )
 
                 helper_payload = {
