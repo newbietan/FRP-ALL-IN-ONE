@@ -23,8 +23,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 
 # ---- 阶段 3: Python 运行环境与整体组装 ----
 FROM python:3.11-slim
-ARG APP_VERSION
+ARG APP_VERSION=3.2.9
 ENV APP_VERSION=${APP_VERSION}
+LABEL io.frp-all-in-one.version="v${APP_VERSION}" \
+      io.frp-all-in-one.role="server" \
+      io.frp-all-in-one.upgrade-protocol="1"
 
 # 安装必要系统工具
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
@@ -53,6 +56,7 @@ COPY --from=frontend-builder /build/dist /app/static
 
 # 复制管理后台源码
 COPY server/ /app/
+COPY server/services/container_upgrade.py /usr/local/lib/frp/container_upgrade.py
 
 # 初始化持久化数据目录
 RUN mkdir -p /app/data /app/certs/auto /app/certs/custom

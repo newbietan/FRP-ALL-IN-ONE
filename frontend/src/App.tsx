@@ -15,9 +15,7 @@ import {
   Globe, 
   Plus, 
   Save, 
-  Cpu, 
   Activity, 
-  Database, 
   CheckCircle2, 
   AlertTriangle, 
   Play, 
@@ -29,15 +27,12 @@ import {
   Lock, 
   Network, 
   HardDrive, 
-  Smartphone, 
   Clock, 
   Menu, 
   ChevronRight, 
   Sliders, 
   Terminal as TerminalIcon,
   X,
-  Server,
-  Zap,
   Radio,
   ExternalLink,
   PlusCircle,
@@ -59,6 +54,8 @@ import {
 } from './data';
 import { APP_VERSION_DISPLAY } from './version';
 import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, agentsApi, isLoggedIn, setToken, clearToken } from './api';
+import type { AgentUpgradeStatus } from './api';
+import { serverUpgradeCompleted, upgradeBusy, upgradeFailed, upgradeTimestamp } from './upgrade';
 import { dashboardWs } from './ws';
 import { MarkdownView } from './components/MarkdownView';
 import { ConfirmModal, ConfirmDialogOptions } from './components/ConfirmModal';
@@ -191,7 +188,10 @@ export default function App() {
   const [serverUpgradeError, setServerUpgradeError] = useState('');
   const [upgradeCapability, setUpgradeCapability] = useState<{ can_self_upgrade: boolean; reason: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogOptions | null>(null);
-  const [agentUpgradeStatuses, setAgentUpgradeStatuses] = useState<Record<string, { status: string; message: string; updated_at?: string }>>({});
+  const [agentUpgradeStatuses, setAgentUpgradeStatuses] = useState<Record<string, AgentUpgradeStatus>>({});
+  const [serverUpgradeJob, setServerUpgradeJob] = useState<string | null>(null);
+  const [agentUpgradeCommands, setAgentUpgradeCommands] = useState<Record<string, { command: string; expiresAt: number }>>({});
+  const [generatingUpgradeCommand, setGeneratingUpgradeCommand] = useState(false);
 
   const showConfirm = (opts: ConfirmDialogOptions) => {
     setConfirmDialog(opts);
@@ -701,125 +701,144 @@ export default function App() {
     }
   };
 
-  // 打开更新弹窗时预先探测自升级支持能力
+  // Resume persisted jobs when reopening the dialog; browser state is not truth.
   useEffect(() => {
-    if (updateModalOpen) {
-      setServerUpgradeError('');
-      systemApi.getUpgradeStatus().then(res => {
-        setUpgradeCapability({
-          can_self_upgrade: res.can_self_upgrade,
-          reason: res.reason,
-        });
-      }).catch(() => {});
-    }
+    if (!updateModalOpen) return;
+    let cancelled = false;
+    systemApi.getUpgradeStatus(AbortSignal.timeout(8000)).then(res => {
+      if (cancelled) return;
+      setUpgradeCapability({ can_self_upgrade: res.can_self_upgrade, reason: res.reason });
+      if (res.is_upgrading && res.job_id) {
+        setIsUpgradingServer(true);
+        setServerUpgradeJob(res.job_id);
+      } else if (upgradeFailed(res.step)) {
+        setServerUpgradeError(res.error || res.message);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [updateModalOpen]);
 
-  // 服务端 Web 面板直接一键平滑升级
+  useEffect(() => {
+    if (!serverUpgradeJob) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const deadline = Date.now() + 20 * 60 * 1000;
+    const poll = async () => {
+      try {
+        const state = await systemApi.getUpgradeStatus(AbortSignal.timeout(8000));
+        if (cancelled) return;
+        if (state.job_id === serverUpgradeJob) {
+          setServerUpgradeProgress(state.message);
+          if (upgradeFailed(state.step)) {
+            setServerUpgradeError(state.error ? `${state.message}: ${state.error}` : state.message);
+            setIsUpgradingServer(false);
+            setServerUpgradeJob(null);
+            return;
+          }
+          if (state.step === 'succeeded') {
+            const health = await systemApi.getUpgradeHealth(AbortSignal.timeout(8000));
+            if (cancelled) return;
+            if (serverUpgradeCompleted(state, health, serverUpgradeJob)) {
+              window.location.reload();
+              return;
+            }
+          }
+        }
+      } catch {
+        // Expected short outage during switch; never infer success from a restart.
+      }
+      if (cancelled) return;
+      if (Date.now() >= deadline) {
+        setServerUpgradeError('升级结果尚未确认，请检查持久任务和辅助容器日志，勿重复升级。');
+        return;
+      }
+      timer = setTimeout(poll, 3000); // no overlapping requests
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [serverUpgradeJob]);
+
+  // Poll durable client state as a reconnect-safe fallback to live WS messages.
+  useEffect(() => {
+    const id = upgradeTargetDevice?.id;
+    if (!id) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const result = await agentsApi.getUpgradeStatus(id, AbortSignal.timeout(8000));
+        if (!cancelled && result.status) {
+          setAgentUpgradeStatuses(prev => ({ ...prev, [id]: result.status! }));
+        }
+      } catch { /* retain last confirmed state during reconnect */ }
+      if (!cancelled) timer = setTimeout(poll, 3000);
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [upgradeTargetDevice?.id]);
+
   const handleTriggerServerUpgrade = () => {
     if (isUpgradingServer) return;
     showConfirm({
-      title: t('平滑升级服务端', 'Upgrade Server'),
+      title: t('升级服务端（支持回滚）', 'Upgrade Server (Rollback Supported)'),
       message: t(
-        `确定立即在 Web 面板平滑升级服务端至最新版本？\n\n升级过程中将拉取腾讯云最新镜像并平滑重启服务（预计耗时 15~30 秒）。\nSQLite 数据库、Token、SSL 证书与密钥 100% 完整保留，现有客户端不会断联。\n重启就绪后页面将自动无缝刷新。`,
-        `Are you sure you want to upgrade the server?\nThe system will pull the latest image and restart (~15-30s). All tokens, client configs, and keys are 100% preserved. The page will auto-refresh once ready.`
+        '将拉取并校验指定版本，备份数据库及配置后切换容器。切换时现有连接会短暂中断并重连；目标版本未通过健康检查时自动恢复旧容器和配置。请勿重复操作。',
+        'The pinned version is verified before switching. Connections briefly disconnect and reconnect. Failed health checks restore the old container and configuration. Do not submit twice.'
       ),
-      confirmText: t('立即升级', 'Upgrade Now'),
-      confirmType: 'primary',
+      confirmText: t('立即升级', 'Upgrade Now'), confirmType: 'primary',
       onConfirm: async () => {
         setIsUpgradingServer(true);
         setServerUpgradeError('');
-        setServerUpgradeProgress(t('正在拉取腾讯云最新镜像并准备平滑重启服务...', 'Pulling latest image and preparing restart...'));
-
         try {
-          const res = await systemApi.upgrade();
-          if (!res.success) {
-            setIsUpgradingServer(false);
-            setServerUpgradeError(res.message);
-            triggerToast(res.message, 'warning');
-            return;
-          }
-
-          setServerUpgradeProgress(t('镜像拉取就绪，服务正在平滑重启并无缝切换，即将完成...', 'Image ready, restarting service smoothly...'));
-
-          // 延迟 3.5 秒后开始轮询健康检测，等待服务重启就绪
-          setTimeout(() => {
-            let attempts = 0;
-            const maxAttempts = 30; // 最多轮询 75 秒
-            const oldStartTime = systemInfo ? (systemInfo as any).server_start_time : undefined;
-
-            const pollInterval = setInterval(async () => {
-              attempts++;
-              try {
-                const info = await systemApi.getInfo();
-                // 校验条件：版本已更新至最新版，或服务启动时间变更/运行时间重置（证明新容器已就绪启动）
-                const versionChanged = Boolean(info.app_version && updateInfo?.latest_version && (info.app_version === updateInfo.latest_version || info.app_version !== updateInfo.current_version));
-                const restarted = Boolean((oldStartTime !== undefined && info.server_start_time && info.server_start_time !== oldStartTime) || (info.uptime_seconds < 25));
-
-                if (versionChanged || restarted) {
-                  clearInterval(pollInterval);
-                  setServerUpgradeProgress(t('升级成功！页面正在自动刷新...', 'Upgrade completed! Refreshing page...'));
-                  triggerToast(t('服务端已平滑升级成功！', 'Server upgraded successfully!'), 'success');
-                  setTimeout(() => {
-                    window.location.reload();
-                  }, 1200);
-                  return;
-                }
-              } catch {
-                // 服务正在重启中（端口暂时不可达），属正常过程，继续轮询
-              }
-
-              if (attempts >= maxAttempts) {
-                clearInterval(pollInterval);
-                setIsUpgradingServer(false);
-                setServerUpgradeProgress('');
-                triggerToast(t('升级未能自动生效，可尝试在宿主机运行备用平滑升级命令', 'Upgrade not detected, try running fallback upgrade command on host'), 'warning');
-              }
-            }, 2500);
-          }, 3500);
-
+          const result = await systemApi.upgrade(updateInfo?.latest_version);
+          if (!result.success || !result.job_id) throw new Error(result.message);
+          setServerUpgradeJob(result.job_id);
+          setServerUpgradeProgress(result.message);
         } catch (err: any) {
+          // A transport failure can happen after the task was accepted. Re-read it.
+          try {
+            const state = await systemApi.getUpgradeStatus(AbortSignal.timeout(8000));
+            if (state.is_upgrading && state.job_id) {
+              setServerUpgradeJob(state.job_id);
+              return;
+            }
+          } catch { /* show uncertainty rather than claim failure/success */ }
           setIsUpgradingServer(false);
-          triggerToast(t(`升级指令下发失败: ${err.message}`, `Failed to trigger upgrade: ${err.message}`), 'warning');
+          setServerUpgradeError(`${err.message}；请先确认任务状态再重试。`);
         }
-      }
+      },
     });
   };
 
-  // 触发单个 Agent 远程升级
   const handleUpgradeSingleAgent = async (device: Device) => {
     try {
       setUpgradingDevice(true);
-      const res = await agentsApi.upgrade(device.id);
-      if (res.signal_sent) {
-        triggerToast(t(`已向客户端 '${device.name}' 下发远程升级信号！`, `Upgrade signal sent to '${device.name}'!`), 'success');
-        setAgentUpgradeStatuses(prev => ({
-          ...prev,
-          [device.id]: {
-            status: 'acknowledged',
-            message: t('升级指令已下发至客户端 WebSocket 信道，客户端已确认收到', 'Upgrade signal dispatched over WebSocket, agent acknowledged'),
-            updated_at: new Date().toISOString(),
-          }
-        }));
-        setTimeout(async () => {
-          try {
-            const st = await agentsApi.getUpgradeStatus(device.id);
-            if (st.status) {
-              setAgentUpgradeStatuses(prev => ({
-                ...prev,
-                [device.id]: st.status as any,
-              }));
-            }
-          } catch {
-            // ignore
-          }
-        }, 1500);
-      } else {
-        triggerToast(t('客户端离线，请复制升级命令在宿主机执行', 'Client offline. Copy and run the command on host.'), 'info');
+      const result = await agentsApi.upgrade(device.id);
+      // Read the real task; a successful socket write is not an acknowledgment.
+      const state = await agentsApi.getUpgradeStatus(device.id);
+      if (state.status) setAgentUpgradeStatuses(prev => ({ ...prev, [device.id]: state.status! }));
+      if (result.upgrade_command) {
+        setAgentUpgradeCommands(prev => ({ ...prev, [device.id]: { command: result.upgrade_command!, expiresAt: Date.now() + 600000 } }));
       }
+      triggerToast(result.message, result.signal_sent ? 'info' : 'warning');
     } catch (err: any) {
-      triggerToast(t(`升级信号发送失败: ${err.message}`, `Upgrade failed: ${err.message}`), 'warning');
+      triggerToast(t(`升级请求未完成: ${err.message}`, `Upgrade request incomplete: ${err.message}`), 'warning');
     } finally {
       setUpgradingDevice(false);
+    }
+  };
+
+  const handleGenerateUpgradeCommand = async (clientId: string) => {
+    setGeneratingUpgradeCommand(true);
+    try {
+      const result = await agentsApi.getUpgradeCommand(clientId);
+      setAgentUpgradeCommands(prev => ({ ...prev, [clientId]: {
+        command: result.upgrade_command, expiresAt: Date.now() + result.expires_in * 1000,
+      } }));
+    } catch (err: any) {
+      triggerToast(err.message, 'warning');
+    } finally {
+      setGeneratingUpgradeCommand(false);
     }
   };
 
@@ -3763,43 +3782,44 @@ export default function App() {
                   <div className="p-2.5 bg-white border border-sky-300 rounded-lg flex flex-col gap-1 text-xs shadow-sm">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="font-semibold text-sky-900 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className={`w-2 h-2 rounded-full ${upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id].status) ? 'bg-amber-500 animate-pulse' : upgradeFailed(agentUpgradeStatuses[upgradeTargetDevice.id].status) ? 'bg-rose-500' : 'bg-emerald-500'}`} />
                         <span>{t('客户端反馈: ', 'Agent Feedback: ')}</span>
                         <span className="text-emerald-700 font-mono font-bold">
-                          {agentUpgradeStatuses[upgradeTargetDevice.id].status === 'acknowledged'
-                            ? t('已确认收到', 'Acknowledged')
-                            : agentUpgradeStatuses[upgradeTargetDevice.id].status}
+                          {agentUpgradeStatuses[upgradeTargetDevice.id].status}
                         </span>
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        {agentUpgradeStatuses[upgradeTargetDevice.id].updated_at
-                          ? new Date(agentUpgradeStatuses[upgradeTargetDevice.id].updated_at!).toLocaleTimeString()
-                          : t('刚刚', 'Just now')}
+                        {upgradeTimestamp(agentUpgradeStatuses[upgradeTargetDevice.id].updated_at)}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-700 bg-slate-50 p-1.5 rounded font-mono">
                       {agentUpgradeStatuses[upgradeTargetDevice.id].message || t('客户端已接收升级指令', 'Agent received upgrade command')}
                     </p>
+                    {agentUpgradeStatuses[upgradeTargetDevice.id].error && (
+                      <p className="text-[10px] text-rose-600 bg-rose-50 p-1.5 rounded font-mono">
+                        {agentUpgradeStatuses[upgradeTargetDevice.id].error}
+                      </p>
+                    )}
                   </div>
                 )}
 
                 <button
                   onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
-                  disabled={upgradingDevice || upgradeTargetDevice.status !== 'online'}
+                  disabled={upgradingDevice || upgradeTargetDevice.status !== 'online' || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)}
                   className={`w-full py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    upgradeTargetDevice.status === 'online'
+                    upgradeTargetDevice.status === 'online' && !upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)
                       ? 'bg-primary hover:bg-[#005166] text-white'
                       : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>{upgradingDevice ? t('下发中...', 'Sending...') : t('发送远程升级信号', 'Send Upgrade Signal')}</span>
+                  <span>{upgradingDevice || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status) ? t('执行中...', 'In Progress...') : t('发送远程升级信号', 'Send Upgrade Signal')}</span>
                 </button>
 
                 <div className="text-[10px] text-slate-500 bg-white/70 p-2 rounded border border-slate-200/80 leading-normal">
                   {t(
-                    '说明：若客户端已挂载 Docker Socket，容器将在接收信号后自动拉取镜像并完成重启；若未挂载，建议直接使用下方的【方式二】一键升级命令。',
-                    'Notice: If the agent container has Docker Socket mounted, it self-upgrades automatically. Otherwise, please use Method 2 below.'
+                    '说明：若客户端已挂载 Docker Socket 且支持升级执行器，容器将在接收信号后自动拉取镜像并完成事务升级与回滚保障；若为首次升级旧版本客户端，建议使用下方的【方式二】一键升级命令。',
+                    'Notice: If the agent container has Docker Socket mounted and supports the upgrade runner, it upgrades automatically with rollback safety. For legacy agents, please use Method 2 below.'
                   )}
                 </div>
               </div>
@@ -3810,31 +3830,50 @@ export default function App() {
                   {t('方式二：在客户端设备执行一键升级命令', 'Method 2: Run Command on Host')}
                 </span>
                 <p className="text-[11px] text-slate-500">
-                  {t('自动拉取腾讯云最新镜像并平滑重建容器，客户端 ID 与 Token 自动继承保留', 'Pulls latest image and recreates container, preserving Client ID & Token')}
+                  {t('生成单次有效且受限的安全升级命令（10分钟有效），自动校验镜像并平滑重建容器，完整保留已有隧道配置', 'Generates a single-use bounded upgrade command (10m validity), pulling verified images and preserving tunnels')}
                 </p>
                 {(() => {
-                  const osType = upgradeTargetDevice.os;
-                  const clientId = upgradeTargetDevice.id;
-                  const origin = window.location.origin;
-                  const cmd = osType === 'windows'
-                    ? `& ([scriptblock]::Create((Invoke-RestMethod '${origin}/api/frp/agent/install-script/windows?client_id=${clientId}')))`
-                    : osType === 'macos'
-                    ? `curl -fsSL '${origin}/api/frp/agent/install-script/darwin?client_id=${clientId}' | bash`
-                    : `curl -fsSL '${origin}/api/frp/agent/install-script/linux?client_id=${clientId}' | sudo bash`;
+                  const cmdEntry = agentUpgradeCommands[upgradeTargetDevice.id];
+                  const hasValidCmd = cmdEntry && cmdEntry.expiresAt > Date.now();
+
+                  if (hasValidCmd) {
+                    return (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
+                            {cmdEntry.command}
+                          </code>
+                          <button
+                            onClick={() => handleCopyText(cmdEntry.command)}
+                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>{t('复制', 'Copy')}</span>
+                          </button>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] text-slate-500">
+                          <span>{t('有效时间至: ', 'Expires at: ')}{new Date(cmdEntry.expiresAt).toLocaleTimeString()}</span>
+                          <button
+                            onClick={() => handleGenerateUpgradeCommand(upgradeTargetDevice.id)}
+                            disabled={generatingUpgradeCommand}
+                            className="text-primary hover:underline cursor-pointer"
+                          >
+                            {generatingUpgradeCommand ? t('生成中...', 'Generating...') : t('重新生成', 'Regenerate')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
-                        {cmd}
-                      </code>
-                      <button
-                        onClick={() => handleCopyText(cmd)}
-                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>{t('复制', 'Copy')}</span>
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => handleGenerateUpgradeCommand(upgradeTargetDevice.id)}
+                      disabled={generatingUpgradeCommand}
+                      className="w-full py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                    >
+                      <Terminal className="w-3.5 h-3.5" />
+                      <span>{generatingUpgradeCommand ? t('正在生成升级命令...', 'Generating Upgrade Command...') : t('生成安全升级命令 (10分钟有效)', 'Generate Secure Upgrade Command (Valid 10m)')}</span>
+                    </button>
                   );
                 })()}
               </div>

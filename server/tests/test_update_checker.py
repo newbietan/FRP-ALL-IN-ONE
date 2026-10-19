@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import importlib
-from unittest.mock import MagicMock
 
+import pytest
+from fastapi import Request
+
+import models
 from database import Base, SessionLocal, engine
 from main import _auto_migrate_db
-import models
-import pytest
 
 
 def test_semantic_version_comparison():
@@ -51,7 +52,7 @@ async def test_agent_upgrade_endpoint():
         db.commit()
 
         agents_module = importlib.import_module("routers.agents")
-        req = MagicMock()
+        req = Request({"type": "http", "scheme": "http", "server": ("panel.example", 8080), "headers": [], "path": "/", "root_path": ""})
         admin = models.Admin(id=1, github_id=1, github_username="admin", is_superadmin=True)
 
         res = await agents_module.trigger_agent_upgrade(client_id, req, db, admin)

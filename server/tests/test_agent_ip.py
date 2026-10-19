@@ -40,7 +40,7 @@ async def test_agent_registration_saves_and_reports_ip():
         "type": "register",
         "data": {
             "client_id": client_id,
-            "version": "3.2.5",
+            "version": "3.2.9",
             "hostname": "test-host",
             "os": "linux",
             "arch": "amd64",

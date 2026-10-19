@@ -505,6 +505,22 @@ func (svr *Service) getVisitorCfg(name string) (v1.VisitorConfigurer, bool) {
 	return ctl.vm.GetVisitorCfg(name)
 }
 
+// IsConnected reports a live authenticated FRPS control session.
+func (svr *Service) IsConnected() bool {
+	svr.ctlMu.RLock()
+	ctl := svr.ctl
+	svr.ctlMu.RUnlock()
+	if ctl == nil {
+		return false
+	}
+	select {
+	case <-ctl.Done():
+		return false
+	default:
+		return true
+	}
+}
+
 func (svr *Service) StatusExporter() StatusExporter {
 	return &statusExporterImpl{
 		getProxyStatusFunc: svr.getProxyStatus,

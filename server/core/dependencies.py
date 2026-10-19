@@ -37,7 +37,7 @@ async def get_current_user(
     try:
         payload = auth.jwt.decode(token, auth.get_secret_key(), algorithms=[auth.ALGORITHM])
         github_id_str: str = payload.get("sub")
-        if github_id_str is None:
+        if payload.get("purpose") not in (None, "access") or github_id_str is None:
             raise credentials_exception
         github_id = int(github_id_str)
     except (auth.JWTError, ValueError):

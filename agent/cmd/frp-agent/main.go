@@ -10,7 +10,7 @@ FRP Manager Agent - 智能客户端代理
 
 使用:
 
-	frp-agent -server ws://your-server.com/ws/agent/CLIENT_ID -token YOUR_TOKEN
+	frp-agent -server wss://your-server.com/ws/agent/CLIENT_ID -token YOUR_TOKEN
 */
 package main
 
@@ -21,17 +21,20 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/frp-manager/agent/internal/config"
 	"github.com/frp-manager/agent/internal/frpc"
 	"github.com/frp-manager/agent/internal/logger"
 	"github.com/frp-manager/agent/internal/monitor"
+	"github.com/frp-manager/agent/internal/upgrade"
 	"github.com/frp-manager/agent/internal/ws"
 )
 
 var (
-	version   = "3.2.5"
+	version   = "3.2.9"
 	buildTime = "unknown"
 )
 
@@ -61,8 +64,18 @@ func main() {
 	configPath := flag.String("config", "/opt/frp/frpc.toml", "frpc 配置文件路径")
 	logPath := flag.String("log", "/opt/frp/logs", "日志存储目录")
 	showVersion := flag.Bool("version", false, "显示版本信息")
+	healthcheck := flag.Bool("healthcheck", false, "检查管理连接、内核与隧道就绪状态")
+	expectedVersion := flag.String("expect-version", "", "健康检查期望的精确版本")
 
 	flag.Parse()
+
+	if *healthcheck {
+		if err := upgrade.CheckHealth(upgrade.HealthPath, *expectedVersion); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *showVersion {
 		fmt.Printf("FRP Manager Agent v%s (built: %s)\n", version, buildTime)
@@ -106,6 +119,29 @@ func main() {
 	sysMonitor := monitor.NewMonitor()
 	frpcManager := frpc.NewManager(cfg.ConfigPath, logCollector)
 	wsClient := ws.NewClient(cfg.ServerURL, cfg.ClientID, cfg.Token, version)
+	ready := func() bool { return wsClient.IsConnected() && frpcManager.Healthy() }
+	upgrader := &upgrade.Runner{
+		Directory: filepath.Dir(cfg.ConfigPath), ClientID: cfg.ClientID, Version: version, Ready: ready,
+		Send: func(data map[string]interface{}) error { return wsClient.Send("upgrade_status", data) },
+	}
+	wsClient.OnConnect = func() { upgrader.Report("") }
+	stopBackground := make(chan struct{})
+	defer close(stopBackground)
+	go upgrader.Monitor(stopBackground)
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := upgrade.WriteHealth(version, ready()); err != nil {
+					log.Printf("[Health] 写入就绪状态失败: %v", err)
+				}
+			case <-stopBackground:
+				return
+			}
+		}
+	}()
 
 	// 设置 WebSocket 消息处理器
 	wsClient.OnMessage = func(msg ws.Message) {
@@ -123,14 +159,7 @@ func main() {
 			log.Println("收到重启命令...")
 			frpcManager.Restart()
 		case "upgrade":
-			log.Println("[Upgrade] 收到服务端远程升级信号...")
-			wsClient.Send("log", "[Upgrade] 收到服务端远程升级指令，正在准备更新...")
-			wsClient.Send("upgrade_status", map[string]interface{}{
-				"client_id": cfg.ClientID,
-				"status":    "acknowledged",
-				"version":   version,
-				"message":   "客户端已确认收到升级信号",
-			})
+			upgrader.Handle(msg.Data)
 		case "ping":
 			wsClient.Send("pong", nil)
 		}
@@ -167,6 +196,8 @@ func main() {
 	<-sigCh
 
 	log.Println("正在关闭...")
+	sysMonitor.Stop()
+	_ = upgrade.WriteHealth(version, false)
 	frpcManager.Stop()
 	wsClient.Close()
 	log.Println("Agent 已退出")

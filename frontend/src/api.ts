@@ -310,6 +310,17 @@ export interface UpgradeStatusResponse {
   message: string;
   error?: string | null;
   fallback_command: string;
+  job_id?: string | null;
+  target_version?: string | null;
+}
+
+export interface AgentUpgradeStatus {
+  job_id?: string;
+  status: string;
+  message: string;
+  error?: string;
+  target_version?: string;
+  updated_at?: number | string;
 }
 
 export interface TriggerUpgradeResponse {
@@ -319,6 +330,7 @@ export interface TriggerUpgradeResponse {
   can_self_upgrade?: boolean;
   fallback_command?: string;
   target_version?: string;
+  job_id?: string;
 }
 
 export const systemApi = {
@@ -366,13 +378,17 @@ export const systemApi = {
   },
 
   /** 触发服务端平滑自升级 */
-  upgrade() {
-    return request<TriggerUpgradeResponse>('POST', '/api/system/upgrade');
+  upgrade(targetVersion?: string) {
+    return request<TriggerUpgradeResponse>('POST', '/api/system/upgrade', { target_version: targetVersion });
   },
 
   /** 获取服务端自升级能力与状态 */
-  getUpgradeStatus() {
-    return request<UpgradeStatusResponse>('GET', '/api/system/upgrade/status');
+  getUpgradeStatus(signal?: AbortSignal) {
+    return request<UpgradeStatusResponse>('GET', '/api/system/upgrade/status', undefined, { signal });
+  },
+
+  getUpgradeHealth(signal?: AbortSignal) {
+    return request<{ ready: boolean; app_version: string }>('GET', '/api/system/upgrade/health', undefined, { signal });
   },
 };
 
@@ -389,7 +405,8 @@ export const agentsApi = {
       signal_sent: boolean;
       client_id: string;
       target_version: string;
-      upgrade_command: string;
+      upgrade_command?: string;
+      job_id?: string;
       message: string;
     }>('POST', `/api/agents/${clientId}/upgrade`);
   },
@@ -399,12 +416,18 @@ export const agentsApi = {
     return request<{
       success: boolean;
       upgraded_count: number;
+      sent_count: number;
+      skipped: Array<{ client_id: string; reason: string }>;
       details: Array<{ client_id: string; name: string; signal_sent: boolean }>;
     }>('POST', '/api/agents/batch-upgrade');
   },
 
   /** 获取指定 Agent 最近升级反馈状态 */
-  getUpgradeStatus(clientId: string) {
-    return request<{ client_id: string; status: Record<string, unknown> | null }>('GET', `/api/agents/${clientId}/upgrade-status`);
+  getUpgradeStatus(clientId: string, signal?: AbortSignal) {
+    return request<{ client_id: string; status: AgentUpgradeStatus | null }>('GET', `/api/agents/${clientId}/upgrade-status`, undefined, { signal });
+  },
+
+  getUpgradeCommand(clientId: string) {
+    return request<{ upgrade_command: string; target_version: string; expires_in: number }>('POST', `/api/agents/${clientId}/upgrade-command`);
   },
 };
