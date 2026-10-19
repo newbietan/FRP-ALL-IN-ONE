@@ -97,6 +97,8 @@ def get_system_info(
     start_dt = datetime.fromtimestamp(_start_time)
 
     return {
+        "app_version": f"v{models.APP_VERSION}",
+        "server_start_time": _start_time,
         "uptime_seconds": uptime_seconds,
         "uptime_display": uptime_str,
         "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),

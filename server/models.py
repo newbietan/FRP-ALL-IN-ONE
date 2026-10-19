@@ -17,12 +17,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
-APP_VERSION = "3.2.2"
+APP_VERSION = "3.2.3"
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 
 def parse_version_tuple(v: str) -> tuple[int, ...]:
-    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.2.2' -> (3, 2, 2)"""
+    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.2.3' -> (3, 2, 3)"""
     if not v:
         return (0, 0, 0)
     cleaned = v.lstrip("vV").strip().split("-")[0]

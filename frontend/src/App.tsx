@@ -711,32 +711,41 @@ export default function App() {
 
           setServerUpgradeProgress(t('镜像拉取就绪，服务正在平滑重启并无缝切换，即将完成...', 'Image ready, restarting service smoothly...'));
 
-          // 延迟 4 秒后开始轮询健康检测，等待服务重启就绪
+          // 延迟 3.5 秒后开始轮询健康检测，等待服务重启就绪
           setTimeout(() => {
             let attempts = 0;
             const maxAttempts = 30; // 最多轮询 75 秒
+            const oldStartTime = systemInfo ? (systemInfo as any).server_start_time : undefined;
+
             const pollInterval = setInterval(async () => {
               attempts++;
               try {
                 const info = await systemApi.getInfo();
-                if (info && info.database_path) {
+                // 校验条件：版本已更新至最新版，或服务启动时间变更/运行时间重置（证明新容器已就绪启动）
+                const versionChanged = Boolean(info.app_version && updateInfo?.latest_version && (info.app_version === updateInfo.latest_version || info.app_version !== updateInfo.current_version));
+                const restarted = Boolean((oldStartTime !== undefined && info.server_start_time && info.server_start_time !== oldStartTime) || (info.uptime_seconds < 25));
+
+                if (versionChanged || restarted) {
                   clearInterval(pollInterval);
                   setServerUpgradeProgress(t('升级成功！页面正在自动刷新...', 'Upgrade completed! Refreshing page...'));
                   triggerToast(t('服务端已平滑升级成功！', 'Server upgraded successfully!'), 'success');
                   setTimeout(() => {
                     window.location.reload();
                   }, 1200);
+                  return;
                 }
               } catch {
-                // 服务正在重启中，继续轮询
-                if (attempts >= maxAttempts) {
-                  clearInterval(pollInterval);
-                  setIsUpgradingServer(false);
-                  triggerToast(t('升级检测超时，请稍后手动刷新页面', 'Upgrade timeout, please refresh the page manually'), 'warning');
-                }
+                // 服务正在重启中（端口暂时不可达），属正常过程，继续轮询
+              }
+
+              if (attempts >= maxAttempts) {
+                clearInterval(pollInterval);
+                setIsUpgradingServer(false);
+                setServerUpgradeProgress('');
+                triggerToast(t('升级未能自动生效，可尝试在宿主机运行备用平滑升级命令', 'Upgrade not detected, try running fallback upgrade command on host'), 'warning');
               }
             }, 2500);
-          }, 4000);
+          }, 3500);
 
         } catch (err: any) {
           setIsUpgradingServer(false);
