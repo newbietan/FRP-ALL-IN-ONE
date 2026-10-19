@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '镜像标签 (如 v3.1.1 或 latest)'
+        description: '镜像标签 (如 v3.2.0 或 latest)'
         required: false
         default: 'latest'
 

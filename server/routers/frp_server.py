@@ -5,19 +5,22 @@ FRP 服务端管理路由
 from __future__ import annotations
 
 import contextlib
+import hmac
 import logging
+import secrets
 import subprocess
 import time
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse
+import httpx
+from sqlalchemy.orm import Session
 
 from core import get_current_user, get_db
 from core.container_engine import run_podman
 import crud
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse
 import frp_deploy
-import httpx
 import models
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -328,73 +331,172 @@ async def enable_port(
 # ===========================
 
 
-@router.get("/agent/install-script/{platform}")
-async def get_agent_install_script(
-    platform: str,
+def _get_or_create_install_token(db: Session) -> str:
+    """获取或初始化服务端安装授权 Token"""
+    token = crud.get_config(db, models.ConfigKeys.SERVER_INSTALL_TOKEN)
+    if not token:
+        token = secrets.token_hex(16)
+        crud.set_config(db, models.ConfigKeys.SERVER_INSTALL_TOKEN, token)
+    return token
+
+
+@router.get("/agent/install-command")
+async def get_agent_install_command(
     request: Request,
-    client_id: str | None = None,
     db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
     """
-    获取动态生成的 Agent 安装脚本
-    platform: linux, darwin, windows
+    获取客户端一键拉取并执行的部署命令（无需预先创建设备）
+    仅生成命令信息，绝不向数据库提前写入任何客户端记录，彻底杜绝幽灵设备
     """
+    server_ip = crud.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
+    tls_enabled = crud.get_config(db, models.ConfigKeys.TLS_ENABLED) == "true"
+    server_domain = (crud.get_config(db, models.ConfigKeys.SERVER_DOMAIN) or "").strip()
+    host_name = server_domain if (tls_enabled and server_domain) else server_ip
+
+    panel_access_port = (crud.get_config(db, models.ConfigKeys.PANEL_ACCESS_PORT) or "").strip()
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").split(",")[0].strip().lower()
+    forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+
+    scheme = "https" if forwarded_proto in ("https", "wss") or tls_enabled else "http"
+    if panel_access_port:
+        manager_host = f"{host_name}:{panel_access_port}"
+    elif forwarded_host:
+        manager_host = forwarded_host
+    else:
+        manager_host = host_name
+
+    install_key = _get_or_create_install_token(db)
+    base_url = f"{scheme}://{manager_host}"
+
+    return {
+        "install_key": install_key,
+        "base_url": base_url,
+        "commands": {
+            "linux": f"curl -fsSL '{base_url}/api/frp/agent/install/linux?key={install_key}' | sudo bash",
+            "darwin": f"curl -fsSL '{base_url}/api/frp/agent/install/darwin?key={install_key}' | bash",
+            "windows": f"& ([scriptblock]::Create((Invoke-RestMethod '{base_url}/api/frp/agent/install/windows?key={install_key}')))"
+        }
+    }
+
+
+@router.post("/agent/reset-install-token")
+async def reset_agent_install_token(
+    db: Session = Depends(get_db),
+    current_user: models.Admin = Depends(get_current_user)
+):
+    """重置客户端安装授权 Token"""
+    new_token = secrets.token_hex(16)
+    crud.set_config(db, models.ConfigKeys.SERVER_INSTALL_TOKEN, new_token)
+    return {"success": True, "install_token": new_token}
+
+
+async def _serve_agent_install_script(
+    platform: str,
+    request: Request,
+    key: str | None,
+    client_id: str | None,
+    db: Session,
+    current_user: models.Admin | None = None
+) -> PlainTextResponse:
     import crud as crud_module
 
     platform = "darwin" if platform == "macos" else platform
     if platform not in {"linux", "darwin", "windows"}:
         raise HTTPException(status_code=400, detail="请选择 linux、darwin 或 windows 容器安装脚本")
 
+    server_key = _get_or_create_install_token(db)
+
+    # 权限校验：已认证管理员，或提供匹配的 install_key，或已指定合法 client_id
+    has_valid_key = bool(key and hmac.compare_digest(key, server_key))
+    is_admin = current_user is not None
+
+    if client_id:
+        client = crud_module.get_client(db, client_id=client_id)
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+    elif has_valid_key or is_admin:
+        # 仅在实际拉取或合法凭据请求时才按需分配新客户端记录
+        suffix = str(int(time.time()))[-6:]
+        client = crud_module.create_client_with_token(db, name=f"device-{suffix}")
+    else:
+        raise HTTPException(status_code=403, detail="缺少有效的安装密钥 (key) 或认证凭据")
+
     auth_token = crud_module.get_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN) or "frp-token"
     server_ip = crud_module.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
     frps_port = crud_module.get_config(db, models.ConfigKeys.FRPS_PORT) or "7000"
     panel_access_port = (crud_module.get_config(db, models.ConfigKeys.PANEL_ACCESS_PORT) or "").strip()
 
-    # 优先级：① 已配置的面板访问端口（NAT 场景显式指定） → ② 请求 Host 头中携带的端口（浏览器经 NAT 访问时）
-    # → ③ 启用 HTTPS+域名 → ④ 公网 IP（裸协议 80）
-    forwarded_proto = ""
-    forwarded_host = ""
-    if request is not None:
-        forwarded_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").split(",")[0].strip().lower()
-        forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").split(",")[0].strip().lower()
+    forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
 
-    if forwarded_proto in ("https", "wss"):
-        ws_scheme = "wss"
-    else:
-        ws_scheme = "ws"
+    ws_scheme = "wss" if forwarded_proto in ("https", "wss") else "ws"
 
     tls_enabled = crud_module.get_config(db, models.ConfigKeys.TLS_ENABLED) == "true"
     server_domain = (crud_module.get_config(db, models.ConfigKeys.SERVER_DOMAIN) or "").strip()
     host_name = server_domain if (tls_enabled and server_domain) else server_ip
 
     if panel_access_port:
-        # 显式 NAT 端口配置：使用配置的域名/公网 IP + 配置的端口
         manager_host = f"{host_name}:{panel_access_port}"
     elif forwarded_host:
         manager_host = forwarded_host
     else:
-        # 回退逻辑：启用 HTTPS + 域名时使用域名，否则使用公网 IP
         manager_host = host_name
-
-    if client_id:
-        client = crud_module.get_client(db, client_id=client_id)
-        if not client:
-            raise HTTPException(status_code=404, detail="Client not found")
-    else:
-        suffix = str(int(time.time()))[-6:]
-        client = crud_module.create_client_with_token(db, name=f"device-{suffix}")
 
     client_id = client.id
     client_token = client.auth_token
 
     if platform == "windows":
         script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host)
-        return PlainTextResponse(content=script, media_type="text/plain")
     else:
         os_type = "darwin" if platform == "darwin" else "linux"
         script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host)
-        return PlainTextResponse(content=script, media_type="text/plain")
+
+    return PlainTextResponse(content=script, media_type="text/plain")
+
+
+@router.get("/agent/install/{platform}")
+async def pull_and_generate_agent_install_script(
+    platform: str,
+    request: Request,
+    key: str | None = None,
+    client_id: str | None = None,
+    db: Session = Depends(get_db)
+):
+    """
+    客户端一键拉取安装脚本入口（由客户端 curl/Invoke-RestMethod 管道自动拉取并执行）
+    仅在此处实际接收到客户端拉取请求时才按需分配客户端 ID 与 Token，杜绝幽灵设备
+    """
+    return await _serve_agent_install_script(
+        platform=platform,
+        request=request,
+        key=key,
+        client_id=client_id,
+        db=db,
+    )
+
+
+@router.get("/agent/install-script/{platform}")
+async def get_agent_install_script(
+    platform: str,
+    request: Request,
+    key: str | None = None,
+    client_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.Admin | None = Depends(get_current_user)
+):
+    """
+    兼容历史端点：获取动态生成的 Agent 安装脚本
+    """
+    return await _serve_agent_install_script(
+        platform=platform,
+        request=request,
+        key=key,
+        client_id=client_id,
+        db=db,
+        current_user=current_user,
+    )
 
 
 def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None):
@@ -440,8 +542,8 @@ Write-Host "[OK] 检测到容器环境: $CONTAINER_CLI" -ForegroundColor Green
 # 2. 嗅探宿主机局域网 IP
 $HOST_IP = ""
 try {{
-    $HOST_IP = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {{ 
-        $_.InterfaceAlias -notmatch 'vEthernet|Loopback|isatap|Teredo' -and $_.IPAddress -notmatch '^(169\\.254|127\\.)' 
+    $HOST_IP = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {{
+        $_.InterfaceAlias -notmatch 'vEthernet|Loopback|isatap|Teredo' -and $_.IPAddress -notmatch '^(169\\.254|127\\.)'
     }} | Select-Object -ExpandProperty IPAddress -First 1)
 }} catch {{}}
 

@@ -184,6 +184,8 @@ export default function App() {
   const [upgradeTargetDevice, setUpgradeTargetDevice] = useState<Device | null>(null);
   const [upgradingDevice, setUpgradingDevice] = useState<boolean>(false);
   const [batchUpgrading, setBatchUpgrading] = useState<boolean>(false);
+  const [isUpgradingServer, setIsUpgradingServer] = useState(false);
+  const [serverUpgradeProgress, setServerUpgradeProgress] = useState('');
   
   const totals = useMemo(() => {
     let totalUploadMB = 0;
@@ -677,6 +679,63 @@ export default function App() {
     }
   };
 
+  // 服务端 Web 面板直接一键平滑升级
+  const handleTriggerServerUpgrade = async () => {
+    if (isUpgradingServer) return;
+    const confirmed = window.confirm(
+      t(
+        `确定立即在 Web 面板平滑升级服务端至最新版本？\n\n升级过程中将拉取腾讯云最新镜像并平滑重启服务（预计耗时 15~30 秒）。\nSQLite 数据库、Token、SSL 证书与密钥 100% 完整保留，现有客户端不会断联。\n重启就绪后页面将自动无缝刷新。`,
+        `Are you sure you want to upgrade the server?\nThe system will pull the latest image and restart (~15-30s). All tokens, client configs, and keys are 100% preserved. The page will auto-refresh once ready.`
+      )
+    );
+    if (!confirmed) return;
+
+    setIsUpgradingServer(true);
+    setServerUpgradeProgress(t('正在拉取腾讯云最新镜像并准备平滑重启服务...', 'Pulling latest image and preparing restart...'));
+
+    try {
+      const res = await systemApi.upgrade();
+      if (!res.success) {
+        setIsUpgradingServer(false);
+        triggerToast(res.message, 'warning');
+        return;
+      }
+
+      setServerUpgradeProgress(t('镜像拉取就绪，服务正在平滑重启并无缝切换，即将完成...', 'Image ready, restarting service smoothly...'));
+
+      // 延迟 4 秒后开始轮询健康检测，等待服务重启就绪
+      setTimeout(() => {
+        let attempts = 0;
+        const maxAttempts = 30; // 最多轮询 75 秒
+        const pollInterval = setInterval(async () => {
+          attempts++;
+          try {
+            const info = await systemApi.getInfo();
+            if (info && info.database_path) {
+              clearInterval(pollInterval);
+              setServerUpgradeProgress(t('升级成功！页面正在自动刷新...', 'Upgrade completed! Refreshing page...'));
+              triggerToast(t('服务端已平滑升级成功！', 'Server upgraded successfully!'), 'success');
+              setTimeout(() => {
+                window.location.reload();
+              }, 1200);
+            }
+          } catch (_e) {
+            // 服务正在重启中，继续轮询
+            if (attempts >= maxAttempts) {
+              clearInterval(pollInterval);
+              setIsUpgradingServer(false);
+              triggerToast(t('升级检测超时，请稍后手动刷新页面', 'Upgrade timeout, please refresh the page manually'), 'warning');
+            }
+          }
+        }, 2500);
+      }, 4000);
+
+    } catch (err: any) {
+      setIsUpgradingServer(false);
+      triggerToast(t(`升级指令下发失败: ${err.message}`, `Failed to trigger upgrade: ${err.message}`), 'warning');
+    }
+  };
+
   // 触发单个 Agent 远程升级
   const handleUpgradeSingleAgent = async (device: Device) => {
     try {
@@ -756,18 +815,30 @@ export default function App() {
     changeScreen(Screen.DASHBOARD, 'push');
   };
 
-  // Script selection handler which handles clicks inside template DIVs
-  const [installScript, setInstallScript] = useState<string>('');
+  // 客户端安装一键命令状态（惰性生成，不预先创建幽灵设备）
+  const [installCommands, setInstallCommands] = useState<{ linux: string; darwin: string; windows: string } | null>(null);
+  const [installCommandsLoading, setInstallCommandsLoading] = useState(false);
+
+  const fetchInstallCommands = async () => {
+    setInstallCommandsLoading(true);
+    try {
+      const res = await frpApi.getInstallCommand();
+      setInstallCommands(res.commands);
+      return res.commands;
+    } catch (err: any) {
+      triggerToast(t(`获取安装命令失败：${err.message}，请重试`, `Failed to load install commands: ${err.message}. Please retry.`), 'warning');
+      return null;
+    } finally {
+      setInstallCommandsLoading(false);
+    }
+  };
+
   const handleSelectOS = async (os: OS) => {
     setSelectedOs(os);
-    setInstallScript('');
-    try {
-      const script = await frpApi.getInstallScript(os === 'macos' ? 'darwin' : os);
-      setInstallScript(script as string);
-      changeScreen(Screen.CLIENT_SCRIPT, 'none');
-    } catch (err: any) {
-      triggerToast(t(`获取安装脚本失败：${err.message}，请重试`, `Failed to load installation script: ${err.message}. Please retry.`), 'warning');
+    if (!installCommands) {
+      fetchInstallCommands();
     }
+    changeScreen(Screen.CLIENT_SCRIPT, 'none');
   };
 
   // 完成部署脚本引导，返回设备列表
@@ -2828,13 +2899,18 @@ export default function App() {
                       exit={{ opacity: 0 }}
                       className="min-h-screen bg-black/30 backdrop-blur-md fixed inset-0 z-50 flex items-center justify-center p-gutter shadow-2xl"
                     >
-                      <div className="relative bg-white w-full max-w-3xl rounded-xl border border-border-subtle flex flex-col mx-margin-mobile max-h-[921px] shadow-[0_4px_24px_rgba(0,0,0,0.08)]">
+                      <div className="relative bg-white w-full max-w-2xl rounded-xl border border-border-subtle flex flex-col mx-margin-mobile shadow-[0_4px_24px_rgba(0,0,0,0.08)] text-left">
                         {/* Header components */}
-                        <div className="px-gutter pt-gutter p-6 pb-4 border-b border-border-subtle flex items-start justify-between">
+                        <div className="px-6 pt-6 pb-4 border-b border-border-subtle flex items-start justify-between">
                           <div>
-                            <h2 className="font-headline-md text-headline-md text-primary font-bold">{t('客户端脚本部署', 'Client Script Quick Deploy')}</h2>
-                            <p className="font-body-md text-body-md text-on-surface-variant mt-2 max-w-xl">
-                              {t('在目标设备上执行脚本。Linux 通常使用 root/sudo；macOS 和 Windows 请使用已启动容器环境的账号。桌面系统的虚拟机网络需额外确认。', 'Run on the target device. Linux usually requires root/sudo; use the container desktop user on macOS/Windows. Verify VM networking on desktop systems.')}
+                            <h2 className="font-headline-md text-headline-md text-primary font-bold">
+                              {t('一键拉取并部署客户端', 'Client One-Click Deploy')}
+                            </h2>
+                            <p className="font-body-md text-body-md text-on-surface-variant mt-1.5 text-xs text-slate-600 max-w-xl">
+                              {t(
+                                '在目标设备终端中执行对应系统的安装命令，客户端将自动从服务端拉取脚本并启动容器。启动后自动注册上线，零多余配置。',
+                                'Run the one-line command on your target device to pull the installer from the server and start the agent container automatically.'
+                              )}
                             </p>
                           </div>
                           
@@ -2848,86 +2924,136 @@ export default function App() {
                         </div>
 
                         {/* Content Scroll area */}
-                        <div className="p-gutter p-6 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+                        <div className="p-6 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4">
                           
-                          {/* Code Editor Container style Code Blocks */}
-                          <div className="rounded-lg border border-border-subtle bg-github-dark overflow-hidden flex flex-col">
-                            {/* Editor Toolbar Header */}
-                            <div className="bg-[#161b22] px-4 py-3 border-b border-[#30363d] flex justify-between items-center">
-                              <div className="flex items-center gap-2 text-[#8b949e] font-label-sm text-xs font-mono uppercase font-bold text-slate-400">
-                                <TerminalIcon className="w-4 h-4 shrink-0 text-primary-container" />
-                                <span>{selectedOs === 'windows' ? 'install_agent.ps1' : 'install_agent.sh'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 font-sans font-medium text-xs">
-                                <button 
-                                  onClick={() => handleCopyText(installScript)}
-                                  className="flex items-center gap-1 px-3 py-1.5 rounded bg-[#21262d] hover:bg-[#30363d] text-primary-container border border-[#30363d] transition-colors cursor-pointer text-slate-300 font-sans"
-                                >
-                                  <Copy className="w-3.5 h-3.5 shrink-0" />
-                                  {t('一键复制', 'Copy Command')}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    const script = installScript;
-                                    const ext = selectedOs === 'windows' ? 'ps1' : 'sh';
-                                    const filename = `install_agent.${ext}`;
-                                    const blob = new Blob([script], { type: 'text/plain;charset=utf-8' });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = filename;
-                                    a.click();
-                                    URL.revokeObjectURL(url);
-                                    triggerToast(t(`已下载 ${filename}`, `Downloaded ${filename}`), 'success');
-                                  }}
-                                  className="hidden sm:flex items-center gap-1 px-3 py-1.5 rounded bg-[#21262d] hover:bg-[#30363d] text-slate-300 border border-[#30363d] transition-colors cursor-pointer text-[#8b949e] font-sans"
-                                >
-                                  <Download className="w-3.5 h-3.5 shrink-0" />
-                                  {t('下载脚本', 'Download Agent')}
-                                </button>
-                              </div>
-                            </div>
+                          {/* OS Tabs */}
+                          <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                            <button
+                              onClick={() => setSelectedOs('linux')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+                                selectedOs === 'linux' ? 'bg-[#006782] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              <Terminal className="w-3.5 h-3.5" />
+                              <span>Linux / NAS ({t('推荐', 'Recommended')})</span>
+                            </button>
+                            <button
+                              onClick={() => setSelectedOs('windows')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+                                selectedOs === 'windows' ? 'bg-[#00add8] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              <LayoutGrid className="w-3.5 h-3.5" />
+                              <span>Windows (PowerShell)</span>
+                            </button>
+                            <button
+                              onClick={() => setSelectedOs('macos')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+                                selectedOs === 'macos' ? 'bg-[#da79ef] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              <Laptop className="w-3.5 h-3.5" />
+                              <span>macOS</span>
+                            </button>
+                          </div>
 
-                            {/* Scripts code display textarea */}
-                            <div className="relative w-full h-[280px]">
-                              <textarea
-                                readOnly
-                                className="absolute inset-0 w-full h-full bg-[#0d1117] text-cyan-400 font-mono text-sm p-4 border-none focus:ring-0 resize-none custom-scrollbar m-0 whitespace-pre text-left focus:outline-none"
-                                spellCheck="false"
-                                value={installScript}
-                              />
+                          {/* Command Box */}
+                          {(() => {
+                            const cmd = installCommands
+                              ? (selectedOs === 'windows' ? installCommands.windows : selectedOs === 'macos' ? installCommands.darwin : installCommands.linux)
+                              : '';
+
+                            return (
+                              <div className="flex flex-col gap-2 p-4 bg-slate-900 rounded-lg text-white border border-slate-800 shadow-inner">
+                                <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+                                  <div className="flex items-center gap-2">
+                                    <TerminalIcon className="w-4 h-4 text-emerald-400" />
+                                    <span>
+                                      {selectedOs === 'windows'
+                                        ? t('PowerShell (管理员) 一键执行命令', 'PowerShell Execution Command')
+                                        : t('Bash / Shell 一键拉取并执行命令', 'Bash Execution Command')}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500">{t('秒级自动就绪', 'Ready in seconds')}</span>
+                                </div>
+
+                                {installCommandsLoading ? (
+                                  <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-400">
+                                    <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+                                    <span>{t('正在生成一键安装命令...', 'Generating installation command...')}</span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <pre className="text-xs font-mono p-3 bg-black/40 rounded border border-slate-800 text-cyan-300 select-all overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+                                      {cmd || t('正在获取命令...', 'Loading command...')}
+                                    </pre>
+                                    <div className="flex justify-end pt-1">
+                                      <button
+                                        onClick={() => handleCopyText(cmd)}
+                                        disabled={!cmd}
+                                        className="px-4 py-2 bg-primary hover:bg-[#005166] text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow transition-colors"
+                                      >
+                                        <Copy className="w-3.5 h-3.5" />
+                                        <span>{t('一键复制安装命令', 'Copy Install Command')}</span>
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Notice */}
+                          <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg flex items-start gap-2.5 text-xs text-amber-900">
+                            <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div className="leading-relaxed">
+                              <span className="font-bold">{t('按需注册说明: ', 'On-Demand Registration: ')}</span>
+                              {t(
+                                '此命令内嵌专用安装密钥 (key)。仅当客户端实际在终端执行此命令时，服务端才会分配设备 ID 并注册上线。如直接取消或未执行，不会在服务端创建任何幽灵设备。',
+                                'This command carries a secure install key. A client ID is only allocated when the command is actually executed on the device. Cancelling leaves no phantom records.'
+                              )}
                             </div>
                           </div>
 
-                          <details className="p-4 rounded border border-border-subtle">
-                            <summary className="cursor-pointer font-semibold text-sm">{t('卸载本设备上的客户端', 'Uninstall the client on this device')}</summary>
-                            <p className="text-xs text-on-surface-variant my-3">{t('在客户端机器上以部署时的账号执行；默认保留配置和日志。彻底清理方法见项目文档，随后在设备列表注销记录。', 'Run on the client using the deployment account. Configuration and logs are kept by default. See the README for full cleanup, then unregister the device.')}</p>
-                            <pre className="text-xs whitespace-pre-wrap break-all bg-slate-50 p-3 rounded">{getClientUninstallCommand(selectedOs)}</pre>
-                            <button onClick={() => handleCopyText(getClientUninstallCommand(selectedOs))} className="mt-3 text-sm text-primary cursor-pointer">{t('复制卸载命令', 'Copy uninstall command')}</button>
+                          {/* Uninstall Accordion */}
+                          <details className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 text-xs">
+                            <summary className="cursor-pointer font-semibold text-slate-700 flex items-center justify-between">
+                              <span>{t('如需卸载客户端（点击展开查看命令）', 'Client Uninstall Command (Click to expand)')}</span>
+                            </summary>
+                            <div className="mt-3 flex flex-col gap-2">
+                              <p className="text-[11px] text-slate-500">
+                                {t('在客户端设备终端运行此命令即可安全清理容器。', 'Run this command on the client terminal to remove the agent container.')}
+                              </p>
+                              <pre className="text-[11px] whitespace-pre-wrap break-all bg-white p-2.5 rounded border border-slate-200 font-mono text-slate-800">
+                                {getClientUninstallCommand(selectedOs)}
+                              </pre>
+                              <div>
+                                <button
+                                  onClick={() => handleCopyText(getClientUninstallCommand(selectedOs))}
+                                  className="text-xs text-primary hover:underline cursor-pointer flex items-center gap-1 font-semibold"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span>{t('复制卸载命令', 'Copy Uninstall Command')}</span>
+                                </button>
+                              </div>
+                            </div>
                           </details>
 
-                          {/* Contextual Guidance */}
-                          <div className="p-4 rounded bg-surface-container-low border border-border-subtle flex gap-3 items-start">
-                            <Info className="w-5 h-5 text-status-warning shrink-0 mt-0.5" />
-                            <div className="font-body-md text-body-md text-on-surface text-left">
-                              <strong>{t('安全提示:', 'Security Alert:')}</strong> {t('该脚本包含您的设备注册令牌 (Token)。请勿在公开环境中分享此脚本。', 'This script contains your device registration token. Do not share it publicly.')}
-                            </div>
-                          </div>
                         </div>
 
-                        {/* Action controllers buttons XPath complete */}
-                        <div className="px-gutter p-6 py-4 border-t border-border-subtle bg-surface flex justify-end items-center gap-4 rounded-b-xl">
+                        {/* Action controllers buttons */}
+                        <div className="px-6 py-4 border-t border-border-subtle bg-slate-50/50 flex justify-end items-center gap-3 rounded-b-xl">
                           <button 
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="font-label-md text-label-md text-on-surface-variant hover:text-on-surface px-4 py-2 transition-colors cursor-pointer font-sans text-sm font-medium"
+                            className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded text-xs font-semibold cursor-pointer"
                           >
                             {t('取消', 'Cancel')}
                           </button>
                           <button 
                             onClick={handleCompleteDeployment}
-                            className="font-label-md text-label-md bg-primary-container text-on-primary hover:bg-primary px-6 py-2 rounded transition-colors shadow-sm cursor-pointer font-sans text-sm font-semibold"
+                            className="px-5 py-2 bg-primary hover:bg-[#005166] text-white rounded text-xs font-semibold cursor-pointer shadow-sm"
                           >
-                            {t('完成部署', 'Complete Provisioning')}
+                            {t('我已在客户端执行 (完成)', 'I Have Run the Command (Done)')}
                           </button>
                         </div>
                       </div>
@@ -3339,25 +3465,60 @@ export default function App() {
               )}
 
               {/* Server Upgrade Guide */}
-              <div className="flex flex-col gap-2 bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <div className="flex flex-col gap-2.5 bg-slate-50 border border-slate-200 rounded-lg p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800 font-mono">
-                    {t('① 服务端一键平滑升级指令', 'Server One-Click Upgrade Command')}
+                    {t('① 服务端一键平滑升级', 'Server One-Click Smooth Upgrade')}
                   </span>
-                  <span className="text-[10px] text-slate-500">{t('数据自动保留，零丢失', 'Data safely preserved')}</span>
+                  <span className="text-[10px] text-emerald-600 font-semibold">{t('数据、Token与密钥 100% 完整保留', 'Data, Tokens & Keys 100% Preserved')}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
-                    curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | bash
-                  </code>
-                  <button
-                    onClick={() => handleCopyText('curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | bash')}
-                    className="px-3 py-2 bg-primary hover:bg-[#005166] text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>{t('复制', 'Copy')}</span>
-                  </button>
-                </div>
+                
+                {isUpgradingServer ? (
+                  <div className="p-4 bg-sky-50 border border-sky-200 rounded-lg flex flex-col items-center justify-center gap-3 text-center">
+                    <div className="flex items-center gap-2 text-sky-800 font-semibold text-xs">
+                      <RefreshCw className="w-4 h-4 animate-spin text-[#006782]" />
+                      <span>{serverUpgradeProgress || t('正在执行平滑升级...', 'Executing smooth upgrade...')}</span>
+                    </div>
+                    <p className="text-[11px] text-sky-600">
+                      {t('服务正在平滑重启并无缝切换，重启就绪后页面将自动刷新，请勿关闭浏览器。', 'The server is restarting smoothly. The page will auto-refresh once ready.')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {t('在 Web 面板直接拉取腾讯云最新镜像并平滑重建容器。SQLite 数据库、Token、SSL 证书及客户端连接全自动保留，无需登录服务器终端。', 'Pulls latest image and smoothly recreates container. SQLite database, tokens, SSL certs and client connections are 100% preserved.')}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleTriggerServerUpgrade}
+                        disabled={isUpgradingServer}
+                        className="flex-1 py-2.5 bg-primary hover:bg-[#005166] text-white rounded text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow transition-all"
+                      >
+                        <ArrowUpCircle className="w-4 h-4" />
+                        <span>{t('立即一键平滑升级服务端 (推荐)', 'Upgrade Server Now (Recommended)')}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* CLI Fallback */}
+                <details className="mt-1 text-xs">
+                  <summary className="text-[11px] text-slate-500 hover:text-slate-700 cursor-pointer">
+                    {t('如未挂载 Socket，可查看终端平滑升级命令（备用）', 'View CLI upgrade command (Alternative)')}
+                  </summary>
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
+                      curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/upgrade.sh | bash
+                    </code>
+                    <button
+                      onClick={() => handleCopyText('curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/upgrade.sh | bash')}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{t('复制', 'Copy')}</span>
+                    </button>
+                  </div>
+                </details>
               </div>
 
               {/* Outdated Clients Summary */}
