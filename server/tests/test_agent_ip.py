@@ -1,7 +1,8 @@
-import models
 import pytest
+
 from database import Base, SessionLocal, engine
 from main import _auto_migrate_db, _handle_agent_message
+import models
 from routers.clients import _build_client_agent_info
 
 
@@ -39,7 +40,7 @@ async def test_agent_registration_saves_and_reports_ip():
         "type": "register",
         "data": {
             "client_id": client_id,
-            "version": "3.1.1",
+            "version": "3.2.0",
             "hostname": "test-host",
             "os": "linux",
             "arch": "amd64",

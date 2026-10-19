@@ -1,17 +1,18 @@
 """
 系统状态相关路由
 """
+import contextlib
+from datetime import datetime
 import os
 import time
-from datetime import datetime
 
-import crud
-import frp_deploy
-import models
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from core import get_current_user, get_db
+import crud
+import frp_deploy
+import models
 
 router = APIRouter(prefix="/system", tags=["系统状态"])
 
@@ -74,10 +75,8 @@ def get_system_info(
     # 数据库文件路径
     db_path = os.path.abspath("./data/frp_manager.db")
     db_size = 0
-    try:
+    with contextlib.suppress(OSError):
         db_size = os.path.getsize("./data/frp_manager.db")
-    except OSError:
-        pass
 
     def format_size(size_bytes):
         if size_bytes >= 1024 * 1024:
@@ -122,3 +121,25 @@ async def check_system_update(
     """
     from services.update_checker import check_github_update
     return await check_github_update(force=force)
+
+
+@router.post("/upgrade")
+async def trigger_system_upgrade(
+    current_user: models.Admin = Depends(get_current_user)
+):
+    """
+    触发服务端平滑自升级
+    仅限已认证管理员操作
+    """
+    from services import self_updater
+    return await self_updater.trigger_self_upgrade()
+
+
+@router.get("/upgrade/status")
+async def get_system_upgrade_status(
+    current_user: models.Admin = Depends(get_current_user)
+):
+    """获取服务端自升级能力与当前状态"""
+    from services import self_updater
+    return self_updater.get_upgrade_status()
+

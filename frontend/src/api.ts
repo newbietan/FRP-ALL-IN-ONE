@@ -196,6 +196,16 @@ export interface FrpsStatus {
   aggregated_traffic_out?: number;
 }
 
+export interface AgentInstallCommandResponse {
+  install_key: string;
+  base_url: string;
+  commands: {
+    linux: string;
+    darwin: string;
+    windows: string;
+  };
+}
+
 export const frpApi = {
   /** 获取 FRPS 状态 */
   getServerStatus() {
@@ -216,7 +226,12 @@ export const frpApi = {
     return request('POST', '/api/frp/restart-frps');
   },
 
-  /** 获取安装脚本 */
+  /** 获取客户端一键部署命令（惰性生成，不预先创建幽灵设备） */
+  getInstallCommand() {
+    return request<AgentInstallCommandResponse>('GET', '/api/frp/agent/install-command');
+  },
+
+  /** 获取安装脚本（用于查看或升级指定已存在设备） */
   getInstallScript(platform: string, clientId?: string) {
     const params = clientId ? `?client_id=${clientId}` : '';
     return request<string>('GET', `/api/frp/agent/install-script/${platform}${params}`);
@@ -281,6 +296,25 @@ export const settingsApi = {
 // 系统状态（无需认证）
 // ===========================
 
+export interface UpgradeStatusResponse {
+  can_self_upgrade: boolean;
+  reason: string;
+  is_upgrading: boolean;
+  step: string;
+  message: string;
+  error?: string | null;
+  fallback_command: string;
+}
+
+export interface TriggerUpgradeResponse {
+  success: boolean;
+  message: string;
+  is_upgrading?: boolean;
+  can_self_upgrade?: boolean;
+  fallback_command?: string;
+  target_version?: string;
+}
+
 export const systemApi = {
   /** 检查 FRPS 是否已部署 */
   getStatus() {
@@ -321,6 +355,16 @@ export const systemApi = {
       checked_at: number;
       error?: string | null;
     }>('GET', `/api/system/check-update${force ? '?force=true' : ''}`);
+  },
+
+  /** 触发服务端平滑自升级 */
+  upgrade() {
+    return request<TriggerUpgradeResponse>('POST', '/api/system/upgrade');
+  },
+
+  /** 获取服务端自升级能力与状态 */
+  getUpgradeStatus() {
+    return request<UpgradeStatusResponse>('GET', '/api/system/upgrade/status');
   },
 };
 

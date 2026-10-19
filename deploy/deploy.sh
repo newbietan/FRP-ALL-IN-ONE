@@ -262,7 +262,22 @@ run_compose() {
 }
 
 ensure_container_socket() {
-    echo -e "${GREEN}[OK] 单容器自闭环架构（内部集成 FRPS 核心，无需宿主机 Socket 挂载）${NC}"
+    echo ""
+    echo "[CHECK] 检查并配置容器管理 Socket（支持 Web 控制台一键平滑升级）..."
+    if [ -S "/var/run/docker.sock" ]; then
+        echo -e "${GREEN}[OK] 检测到宿主机 Docker Socket: /var/run/docker.sock${NC}"
+    elif [ -S "/run/podman/podman.sock" ]; then
+        ln -sf /run/podman/podman.sock /var/run/docker.sock 2>/dev/null || true
+        echo -e "${GREEN}[OK] 已关联 Podman Socket 至 /var/run/docker.sock${NC}"
+    elif command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "podman.socket"; then
+        systemctl enable --now podman.socket 2>/dev/null || true
+        if [ -S "/run/podman/podman.sock" ]; then
+            ln -sf /run/podman/podman.sock /var/run/docker.sock 2>/dev/null || true
+            echo -e "${GREEN}[OK] 已启动 podman.socket 并关联至 /var/run/docker.sock${NC}"
+        fi
+    else
+        echo -e "${YELLOW}[INFO] 未检测到容器管理 Socket，支持通过一键升级脚本完成更新${NC}"
+    fi
 }
 
 check_memory() {
@@ -341,12 +356,19 @@ cleanup_existing_project_containers() {
         fi
     done
 
-    # 4. 彻底重置数据目录与历史文件，保证每次部署均完全幂等
+    # 4. 数据目录与历史配置持久化保护：现有数据库、密钥与配置 100% 完整保留，绝不误删
+    if [ -f "$SCRIPT_DIR/frps.toml" ] && [ ! -f "$SCRIPT_DIR/data/frps.toml" ]; then
+        mkdir -p "$SCRIPT_DIR/data"
+        mv "$SCRIPT_DIR/frps.toml" "$SCRIPT_DIR/data/frps.toml"
+    fi
     rm -rf "$SCRIPT_DIR/frps.toml"
-    rm -rf "$SCRIPT_DIR/data"
     mkdir -p "$SCRIPT_DIR/data"
 
-    echo -e "${GREEN}[OK] 旧容器与历史数据残留已清理完成${NC}"
+    if [ -f "$SCRIPT_DIR/data/frp_manager.db" ]; then
+        echo -e "${GREEN}[OK] 检测到现有数据库，所有客户端与隧道配置已完好保留（零数据丢失）${NC}"
+    fi
+
+    echo -e "${GREEN}[OK] 旧容器清理完成，数据持久化已确认${NC}"
 }
 
 ensure_compose_file() {
@@ -362,6 +384,9 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 COMPOSE_EOF
     echo -e "${GREEN}[OK] compose.yml 已就绪${NC}"
 }
@@ -548,13 +573,13 @@ configure_env_vars() {
     fi
 
     # ---- SECRET_KEY ----
-    # 每次部署重新生成，使旧 JWT 令牌立即失效
-    SECRET_KEY=$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=' | head -c 64)
-    # 清理系统持久化文件中的旧密钥（不再持久化 SECRET_KEY）
-    if [ -f "/etc/frp-all-in-one.env" ]; then
-        sed -i '/^SECRET_KEY=/d' /etc/frp-all-in-one.env 2>/dev/null || true
+    # 若 .env 或系统持久化配置中已存在 SECRET_KEY，保留沿用，避免现有登录凭证失效
+    if [ -z "${SECRET_KEY:-}" ]; then
+        SECRET_KEY=$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=' | head -c 64)
+        echo -e "${GREEN}[OK] 已生成全新 SECRET_KEY${NC}"
+    else
+        echo -e "${GREEN}[OK] 沿用现有 SECRET_KEY（保持登录态与会话有效）${NC}"
     fi
-    echo -e "${GREEN}[OK] 已重新生成 SECRET_KEY（旧登录会话已失效）${NC}"
 
     # 写入项目 .env 文件（供 docker compose 使用）
     cat > "$ENV_FILE" <<ENVEOF

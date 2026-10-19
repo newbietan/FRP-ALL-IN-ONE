@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import enum
 from datetime import datetime, timezone
+import enum
 
-from database import Base
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -16,12 +15,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-APP_VERSION = "3.1.1"
+from database import Base
+
+APP_VERSION = "3.2.0"
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 
 def parse_version_tuple(v: str) -> tuple[int, ...]:
-    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.1.1' -> (3, 1, 1)"""
+    """解析版本字符串为整型元组供语义化版本对比，例如 'v3.2.0' -> (3, 2, 0)"""
     if not v:
         return (0, 0, 0)
     cleaned = v.lstrip("vV").strip().split("-")[0]
@@ -107,6 +108,7 @@ class ConfigKeys:
     TLS_ENABLED = "tls_enabled"        # HTTPS 是否启用
     TLS_MODE = "tls_mode"              # HTTPS 模式：auto(Let's Encrypt) / custom(自定义证书)
     PANEL_ACCESS_PORT = "panel_access_port"  # 管理面板公网访问端口（NAT 映射场景，如 10967）
+    SERVER_INSTALL_TOKEN = "server_install_token"  # noqa: S105
 
 
 class Tunnel(Base):
