@@ -139,6 +139,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -154,6 +157,7 @@ jobs:
         with:
           context: .
           file: server/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.SERVER_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
@@ -173,6 +177,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -188,6 +195,7 @@ jobs:
         with:
           context: .
           file: agent/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.AGENT_IMAGE }}:${{ needs.detect-changes.outputs.tag }}
