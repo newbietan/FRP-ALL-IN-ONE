@@ -18,15 +18,6 @@ on:
         required: false
         default: ''
   push:
-    branches:
-      - main
-    paths:
-      - 'server/**'
-      - 'frontend/**'
-      - 'agent/**'
-      - 'core/**'
-      - 'deploy/**'
-      - '.github/workflows/release.yml'
     tags:
       - 'v*'
 
