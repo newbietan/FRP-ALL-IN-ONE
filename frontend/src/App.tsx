@@ -188,6 +188,8 @@ export default function App() {
   const [batchUpgrading, setBatchUpgrading] = useState<boolean>(false);
   const [isUpgradingServer, setIsUpgradingServer] = useState(false);
   const [serverUpgradeProgress, setServerUpgradeProgress] = useState('');
+  const [serverUpgradeError, setServerUpgradeError] = useState('');
+  const [upgradeCapability, setUpgradeCapability] = useState<{ can_self_upgrade: boolean; reason: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogOptions | null>(null);
 
   const showConfirm = (opts: ConfirmDialogOptions) => {
@@ -686,6 +688,19 @@ export default function App() {
     }
   };
 
+  // 打开更新弹窗时预先探测自升级支持能力
+  useEffect(() => {
+    if (updateModalOpen) {
+      setServerUpgradeError('');
+      systemApi.getUpgradeStatus().then(res => {
+        setUpgradeCapability({
+          can_self_upgrade: res.can_self_upgrade,
+          reason: res.reason,
+        });
+      }).catch(() => {});
+    }
+  }, [updateModalOpen]);
+
   // 服务端 Web 面板直接一键平滑升级
   const handleTriggerServerUpgrade = () => {
     if (isUpgradingServer) return;
@@ -699,12 +714,14 @@ export default function App() {
       confirmType: 'primary',
       onConfirm: async () => {
         setIsUpgradingServer(true);
+        setServerUpgradeError('');
         setServerUpgradeProgress(t('正在拉取腾讯云最新镜像并准备平滑重启服务...', 'Pulling latest image and preparing restart...'));
 
         try {
           const res = await systemApi.upgrade();
           if (!res.success) {
             setIsUpgradingServer(false);
+            setServerUpgradeError(res.message);
             triggerToast(res.message, 'warning');
             return;
           }
@@ -3514,6 +3531,28 @@ export default function App() {
                   </span>
                   <span className="text-[10px] text-emerald-600 font-semibold">{t('数据、Token与密钥 100% 完整保留', 'Data, Tokens & Keys 100% Preserved')}</span>
                 </div>
+
+                {/* 环境不支持直接自升级时的清晰指引 */}
+                {upgradeCapability && !upgradeCapability.can_self_upgrade && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900 font-sans leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">{t('环境提示: ', 'Environment Notice: ')}</span>
+                      {upgradeCapability.reason}
+                    </div>
+                  </div>
+                )}
+
+                {/* 升级执行报错信息展示 */}
+                {serverUpgradeError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-xs text-rose-900 font-sans leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">{t('升级失败: ', 'Upgrade Failed: ')}</span>
+                      {serverUpgradeError}
+                    </div>
+                  </div>
+                )}
                 
                 {isUpgradingServer ? (
                   <div className="p-4 bg-sky-50 border border-sky-200 rounded-lg flex flex-col items-center justify-center gap-3 text-center">
@@ -3533,8 +3572,12 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleTriggerServerUpgrade}
-                        disabled={isUpgradingServer}
-                        className="flex-1 py-2.5 bg-primary hover:bg-[#005166] text-white rounded text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow transition-all"
+                        disabled={isUpgradingServer || upgradeCapability?.can_self_upgrade === false}
+                        className={`flex-1 py-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-2 shadow transition-all ${
+                          upgradeCapability?.can_self_upgrade === false
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                            : 'bg-primary hover:bg-[#005166] text-white cursor-pointer'
+                        }`}
                       >
                         <ArrowUpCircle className="w-4 h-4" />
                         <span>{t('立即一键平滑升级服务端 (推荐)', 'Upgrade Server Now (Recommended)')}</span>

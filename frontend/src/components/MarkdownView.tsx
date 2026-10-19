@@ -79,7 +79,9 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
       continue;
     }
 
-    if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < lines.length && lines[i + 1].includes('|-')) {
+    const isTableDelimiter = (str: string) => /^\|?(\s*:?-+:?\s*\|)+\s*$/.test(str.trim());
+
+    if (trimmed.startsWith('|') && trimmed.endsWith('|') && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
       const headerCells = trimmed
         .split('|')
         .slice(1, -1)
@@ -98,12 +100,12 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
       }
 
       elements.push(
-        <div key={`table-${i}`} className="my-2.5 overflow-x-auto border border-slate-200 rounded-lg shadow-sm">
-          <table className="w-full text-xs text-left border-collapse bg-white">
-            <thead className="bg-slate-100/90 text-slate-700 font-semibold border-b border-slate-200">
+        <div key={`table-${i}`} className="my-2.5 overflow-x-auto border border-slate-200 rounded-xl shadow-sm bg-white">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead className="bg-slate-100/90 text-slate-800 font-semibold border-b border-slate-200">
               <tr>
                 {headerCells.map((h: string, hIdx: number) => (
-                  <th key={hIdx} className="px-3 py-2 font-mono">
+                  <th key={hIdx} className="px-3 py-2 font-sans">
                     {renderInline(h)}
                   </th>
                 ))}
@@ -113,7 +115,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
               {bodyRows.map((row: string[], rIdx: number) => (
                 <tr key={rIdx} className="hover:bg-slate-50/80 transition-colors">
                   {row.map((cell: string, cIdx: number) => (
-                    <td key={cIdx} className="px-3 py-2 font-mono text-slate-700">
+                    <td key={cIdx} className="px-3 py-2 text-slate-700">
                       {renderInline(cell)}
                     </td>
                   ))}
