@@ -44,6 +44,40 @@ else
     exit 1
 fi
 
+# 检查并配置容器管理 Socket（支持后续 Web 控制台一键自升级）
+if [ -S "/var/run/docker.sock" ]; then
+    echo -e "${GREEN}[OK] 检测到宿主机 Docker Socket: /var/run/docker.sock${NC}"
+elif [ -S "/run/podman/podman.sock" ]; then
+    ln -sf /run/podman/podman.sock /var/run/docker.sock 2>/dev/null || true
+    echo -e "${GREEN}[OK] 已关联 Podman Socket 至 /var/run/docker.sock${NC}"
+elif command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "podman.socket"; then
+    systemctl enable --now podman.socket 2>/dev/null || true
+    if [ -S "/run/podman/podman.sock" ]; then
+        ln -sf /run/podman/podman.sock /var/run/docker.sock 2>/dev/null || true
+        echo -e "${GREEN}[OK] 已启动 podman.socket 并关联至 /var/run/docker.sock${NC}"
+    fi
+fi
+
+# 确保 compose.yml 包含最新的标准配置（特别是 docker.sock 挂载，开启 Web 面板自升级）
+if [ ! -f "$COMPOSE_FILE" ] || ! grep -q "docker.sock" "$COMPOSE_FILE"; then
+    echo "[CONFIG] 更新 compose.yml 增加 Socket 挂载（供后续 Web 面板直接一键升级）..."
+    cat > "$COMPOSE_FILE" << 'COMPOSE_EOF'
+---
+services:
+  server:
+    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest
+    container_name: frp-server
+    restart: always
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+COMPOSE_EOF
+fi
+
 IMAGE="sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest"
 
 echo "[1/3] 正在从腾讯云镜像仓库拉取最新服务端镜像..."
