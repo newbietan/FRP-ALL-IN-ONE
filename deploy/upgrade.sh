@@ -84,14 +84,17 @@ echo "[1/3] 正在从腾讯云镜像仓库拉取最新服务端镜像..."
 $CLI pull "$IMAGE"
 
 echo "[2/3] 正在以最新镜像平滑重启服务端容器..."
+# 先强制移除旧容器，确保 Docker Compose 必定以最新拉取的镜像无缝重建（避免识别为已是最新跳过）
+$CLI rm -f frp-server 2>/dev/null || true
+
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    docker compose -f "$COMPOSE_FILE" up -d --no-deps server
+    docker compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps server
 elif command -v docker-compose >/dev/null 2>&1; then
-    docker-compose -f "$COMPOSE_FILE" up -d --no-deps server
+    docker-compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps server
 elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
-    podman compose -f "$COMPOSE_FILE" up -d --no-deps server
+    podman compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps server
 elif command -v podman-compose >/dev/null 2>&1; then
-    podman-compose -f "$COMPOSE_FILE" up -d --no-deps server
+    podman-compose -f "$COMPOSE_FILE" up -d --force-recreate --no-deps server
 else
     # 回退：直接使用容器 CLI 重建
     $CLI rm -f frp-server 2>/dev/null || true

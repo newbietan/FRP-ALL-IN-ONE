@@ -6,24 +6,26 @@ FRP Manager API - 主入口
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import hmac
 import json as _json
 import os
+from pathlib import Path
 import re
 import time as _time
 import traceback
-from datetime import datetime, timezone
-from pathlib import Path
 from urllib.parse import urlparse
 
-import auth
-import crud
-import models
-from core.rate_limit import setup_rate_limit
-from database import SessionLocal, engine
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+
+import auth
+from core.rate_limit import setup_rate_limit
+import crud
+from database import SessionLocal, engine
+import models
 from routers import agents as agents_router
 from routers import auth as auth_router
 from routers import clients as clients_router
@@ -33,7 +35,6 @@ from routers import system as system_router
 from routers.frp_server import get_frps_status
 from services.dashboard import build_full_sync_data
 from services.tls_manager import tls_manager
-from sqlalchemy.orm import Session
 from websocket_manager import manager as ws_manager
 
 # FRPS Dashboard 状态缓存（每 5 秒刷新一次，避免 WS 循环每秒调用）
@@ -594,5 +595,12 @@ if _static_dir.is_dir():
             return FileResponse(str(target))
         index_path = _static_dir / "index.html"
         if index_path.is_file():
-            return FileResponse(str(index_path))
+            return FileResponse(
+                str(index_path),
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
         raise HTTPException(status_code=404, detail="Frontend assets not found")
