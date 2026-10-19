@@ -2,13 +2,16 @@
 Agent 管理路由
 包含 Agent 列表、详情、指标查询、配置推送等
 """
+from __future__ import annotations
+
 import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
 
 from core import get_current_user, get_db
 import crud
-from fastapi import APIRouter, Depends, HTTPException, Request
 import models
-from sqlalchemy.orm import Session
 from websocket_manager import manager as ws_manager
 
 router = APIRouter(prefix="/agents", tags=["Agent 管理"])
@@ -21,15 +24,12 @@ async def get_agents(
 ):
     """获取所有 Agent 列表"""
     agents = db.query(models.AgentInfo).all()
-    
+
     result = []
     for agent in agents:
-        # 检查是否真正在线（WebSocket 连接状态）
         is_ws_connected = ws_manager.is_agent_online(agent.client_id)
-        
-        # 获取实时系统信息
         system_info = ws_manager.agent_system_info.get(agent.client_id, {})
-        
+
         raw_ips = system_info.get("ips")
         if not raw_ips and agent.ips:
             try:
@@ -48,7 +48,6 @@ async def get_agents(
             "ips": raw_ips or [],
             "is_online": is_ws_connected,
             "created_at": agent.created_at.isoformat() if agent.created_at else None,
-            # 实时系统信息
             "cpu_percent": system_info.get("cpu_percent"),
             "memory_percent": system_info.get("memory_percent"),
             "memory_used": system_info.get("memory_used"),
@@ -57,7 +56,7 @@ async def get_agents(
             "disk_used": system_info.get("disk_used"),
             "disk_total": system_info.get("disk_total"),
         })
-    
+
     return {"agents": result, "total": len(result)}
 
 
@@ -71,12 +70,11 @@ async def get_agent_detail(
     agent = db.query(models.AgentInfo).filter(
         models.AgentInfo.client_id == client_id
     ).first()
-    
+
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    
+
     is_ws_connected = ws_manager.is_agent_online(client_id)
-    
     system_info = ws_manager.agent_system_info.get(client_id, {})
     raw_ips = system_info.get("ips")
     if not raw_ips and agent.ips:
@@ -112,10 +110,8 @@ async def get_agent_metrics(
     metrics = db.query(models.SystemMetrics).filter(
         models.SystemMetrics.client_id == client_id
     ).order_by(models.SystemMetrics.timestamp.desc()).limit(limit).all()
-    
-    # 反转顺序（从旧到新）
+
     metrics = list(reversed(metrics))
-    
     result = []
     for m in metrics:
         result.append({
@@ -130,7 +126,7 @@ async def get_agent_metrics(
             "net_bytes_in": m.net_bytes_in,
             "net_bytes_out": m.net_bytes_out
         })
-    
+
     return {"metrics": result, "total": len(result)}
 
 
@@ -144,10 +140,10 @@ async def get_agent_latest_metrics(
     latest = db.query(models.SystemMetrics).filter(
         models.SystemMetrics.client_id == client_id
     ).order_by(models.SystemMetrics.timestamp.desc()).first()
-    
+
     if not latest:
         return {"success": False, "message": "No metrics found"}
-    
+
     return {
         "success": True,
         "timestamp": latest.timestamp.isoformat() if latest.timestamp else None,
@@ -173,12 +169,12 @@ async def push_config_to_agent(
 ):
     """推送配置更新到 Agent"""
     config_content = config.get("config", "")
-    
+
     if not config_content:
         raise HTTPException(status_code=400, detail="Config content is required")
-    
+
     success = await ws_manager.push_config_to_agent(client_id, config_content)
-    
+
     if success:
         return {"success": True, "message": "Config pushed successfully"}
     else:
@@ -243,6 +239,16 @@ async def trigger_agent_upgrade(
         "upgrade_command": upgrade_cmd,
         "message": "已向客户端下发远程升级信号" if ws_sent else "客户端当前离线，已生成升级执行命令"
     }
+
+
+@router.get("/{client_id}/upgrade-status")
+async def get_agent_upgrade_status_endpoint(
+    client_id: str,
+    current_user: models.Admin = Depends(get_current_user)
+):
+    """获取指定 Agent 最近的升级反馈状态"""
+    status = ws_manager.get_agent_upgrade_status(client_id)
+    return {"client_id": client_id, "status": status}
 
 
 @router.post("/batch-upgrade")

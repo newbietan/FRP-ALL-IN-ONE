@@ -1,7 +1,10 @@
-import re
-from pydantic import BaseModel, field_validator
-from typing import List, Optional
+from __future__ import annotations
+
 from enum import Enum
+import re
+
+from pydantic import BaseModel, field_validator
+
 
 class TunnelType(str, Enum):
     TCP = "tcp"
@@ -9,14 +12,15 @@ class TunnelType(str, Enum):
     HTTP = "http"
     HTTPS = "https"
 
+
 class TunnelBase(BaseModel):
     name: str
     type: TunnelType
     enabled: bool = True
     local_ip: str = "127.0.0.1"
     local_port: int
-    remote_port: Optional[int] = None
-    custom_domains: Optional[str] = None
+    remote_port: int | None = None
+    custom_domains: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -39,7 +43,7 @@ class TunnelBase(BaseModel):
 
     @field_validator("custom_domains")
     @classmethod
-    def validate_custom_domains(cls, v: Optional[str]) -> Optional[str]:
+    def validate_custom_domains(cls, v: str | None) -> str | None:
         if not v:
             return v
         for domain in v.split(","):
@@ -52,8 +56,10 @@ class TunnelBase(BaseModel):
                 raise ValueError(f"域名 '{domain}' 长度超过 253 个字符")
         return v
 
+
 class TunnelCreate(TunnelBase):
     pass
+
 
 class Tunnel(TunnelBase):
     id: int
@@ -62,8 +68,11 @@ class Tunnel(TunnelBase):
     class Config:
         from_attributes = True
 
+
 class ClientBase(BaseModel):
     name: str
+    remark: str | None = None
+
 
 class ClientCreate(ClientBase):
     @field_validator("name")
@@ -75,37 +84,30 @@ class ClientCreate(ClientBase):
             raise ValueError("名称长度不能超过 64 个字符")
         return v
 
-class ClientUpdate(BaseModel):
-    name: str
 
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("名称不能为空")
-        if not re.match(r'^[a-zA-Z0-9_\-. ]+$', v):
-            raise ValueError("名称只能包含字母、数字、下划线、连字符、点和空格")
-        if len(v) > 64:
-            raise ValueError("名称长度不能超过 64 个字符")
-        return v
+class ClientUpdate(BaseModel):
+    name: str | None = None
+    remark: str | None = None
+
 
 class Client(ClientBase):
     id: str
     auth_token: str
     status: str
     last_seen: int
-    tunnels: List[Tunnel] = []
-    agent_info: Optional[dict] = None
+    remark: str | None = None
+    tunnels: list[Tunnel] = []
+    agent_info: dict | None = None
 
     class Config:
         from_attributes = True
+
 
 class AdminInfo(BaseModel):
     id: int
     github_id: int
     github_username: str
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
     is_superadmin: bool
 
     class Config:

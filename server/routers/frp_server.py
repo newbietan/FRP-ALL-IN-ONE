@@ -745,12 +745,18 @@ $CONTAINER_CLI rm -f frp-agent 2>/dev/null || true
 log_info "[5/5] 从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..."
 $CONTAINER_CLI pull "$IMAGE"
 
+SOCK_MOUNT=""
+if [ -S "/var/run/docker.sock" ]; then
+    SOCK_MOUNT="-v /var/run/docker.sock:/var/run/docker.sock"
+fi
+
 $CONTAINER_CLI run -d \\
   --name frp-agent \\
   --network host \\
   --restart always \\
   --label io.frp-all-in-one.role=client \\
   --label com.centurylinklabs.watchtower.enable=true \\
+  $SOCK_MOUNT \\
   -v "$INSTALL_DIR:/opt/frp" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
   -e FRP_HOST_IP="$HOST_IP" \\

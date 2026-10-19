@@ -41,6 +41,9 @@ class ConnectionManager:
         # 各 Agent 最后一次写入 DB 的时间戳，用于节流（每 30 秒写一次）
         self._metrics_last_write: dict[str, float] = {}
 
+        # 各 Agent 最近的升级反馈记录 (client_id -> status_data)
+        self.agent_upgrade_status: dict[str, dict[str, Any]] = {}
+
     # ========================
     # Dashboard 连接管理
     # ========================
@@ -129,6 +132,17 @@ class ConnectionManager:
     def get_recent_conflicts(self) -> list[dict[str, Any]]:
         """获取最近的 client_id 冲突事件列表"""
         return list(self.conflict_events)
+
+    def update_agent_upgrade_status(self, client_id: str, status_data: dict[str, Any]):
+        """记录 Agent 远程升级反馈"""
+        self.agent_upgrade_status[client_id] = {
+            **status_data,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def get_agent_upgrade_status(self, client_id: str) -> dict[str, Any] | None:
+        """获取指定 Agent 最近的远程升级反馈"""
+        return self.agent_upgrade_status.get(client_id)
 
     async def disconnect_agent(self, client_id: str, websocket: WebSocket | None = None) -> bool:
         """断开 Agent 连接；旧会话不得清理同 ID 的新连接。"""
