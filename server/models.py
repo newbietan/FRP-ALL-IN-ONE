@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import enum
+import os
 
 from sqlalchemy import (
     BigInteger,
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
-APP_VERSION = "3.2.5"
+APP_VERSION = os.environ.get("APP_VERSION", "3.2.5")
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 
