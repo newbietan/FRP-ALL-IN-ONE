@@ -61,6 +61,7 @@ import { APP_VERSION_DISPLAY } from './version';
 import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, agentsApi, isLoggedIn, setToken, clearToken } from './api';
 import { dashboardWs } from './ws';
 import { MarkdownView } from './components/MarkdownView';
+import { ConfirmModal, ConfirmDialogOptions } from './components/ConfirmModal';
 
 // Navigation transitions simulation mapping
 const animationVariants = {
@@ -187,6 +188,11 @@ export default function App() {
   const [batchUpgrading, setBatchUpgrading] = useState<boolean>(false);
   const [isUpgradingServer, setIsUpgradingServer] = useState(false);
   const [serverUpgradeProgress, setServerUpgradeProgress] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogOptions | null>(null);
+
+  const showConfirm = (opts: ConfirmDialogOptions) => {
+    setConfirmDialog(opts);
+  };
   
   const totals = useMemo(() => {
     let totalUploadMB = 0;
@@ -681,60 +687,63 @@ export default function App() {
   };
 
   // 服务端 Web 面板直接一键平滑升级
-  const handleTriggerServerUpgrade = async () => {
+  const handleTriggerServerUpgrade = () => {
     if (isUpgradingServer) return;
-    const confirmed = window.confirm(
-      t(
+    showConfirm({
+      title: t('平滑升级服务端', 'Upgrade Server'),
+      message: t(
         `确定立即在 Web 面板平滑升级服务端至最新版本？\n\n升级过程中将拉取腾讯云最新镜像并平滑重启服务（预计耗时 15~30 秒）。\nSQLite 数据库、Token、SSL 证书与密钥 100% 完整保留，现有客户端不会断联。\n重启就绪后页面将自动无缝刷新。`,
         `Are you sure you want to upgrade the server?\nThe system will pull the latest image and restart (~15-30s). All tokens, client configs, and keys are 100% preserved. The page will auto-refresh once ready.`
-      )
-    );
-    if (!confirmed) return;
+      ),
+      confirmText: t('立即升级', 'Upgrade Now'),
+      confirmType: 'primary',
+      onConfirm: async () => {
+        setIsUpgradingServer(true);
+        setServerUpgradeProgress(t('正在拉取腾讯云最新镜像并准备平滑重启服务...', 'Pulling latest image and preparing restart...'));
 
-    setIsUpgradingServer(true);
-    setServerUpgradeProgress(t('正在拉取腾讯云最新镜像并准备平滑重启服务...', 'Pulling latest image and preparing restart...'));
-
-    try {
-      const res = await systemApi.upgrade();
-      if (!res.success) {
-        setIsUpgradingServer(false);
-        triggerToast(res.message, 'warning');
-        return;
-      }
-
-      setServerUpgradeProgress(t('镜像拉取就绪，服务正在平滑重启并无缝切换，即将完成...', 'Image ready, restarting service smoothly...'));
-
-      // 延迟 4 秒后开始轮询健康检测，等待服务重启就绪
-      setTimeout(() => {
-        let attempts = 0;
-        const maxAttempts = 30; // 最多轮询 75 秒
-        const pollInterval = setInterval(async () => {
-          attempts++;
-          try {
-            const info = await systemApi.getInfo();
-            if (info && info.database_path) {
-              clearInterval(pollInterval);
-              setServerUpgradeProgress(t('升级成功！页面正在自动刷新...', 'Upgrade completed! Refreshing page...'));
-              triggerToast(t('服务端已平滑升级成功！', 'Server upgraded successfully!'), 'success');
-              setTimeout(() => {
-                window.location.reload();
-              }, 1200);
-            }
-          } catch {
-            // 服务正在重启中，继续轮询
-            if (attempts >= maxAttempts) {
-              clearInterval(pollInterval);
-              setIsUpgradingServer(false);
-              triggerToast(t('升级检测超时，请稍后手动刷新页面', 'Upgrade timeout, please refresh the page manually'), 'warning');
-            }
+        try {
+          const res = await systemApi.upgrade();
+          if (!res.success) {
+            setIsUpgradingServer(false);
+            triggerToast(res.message, 'warning');
+            return;
           }
-        }, 2500);
-      }, 4000);
 
-    } catch (err: any) {
-      setIsUpgradingServer(false);
-      triggerToast(t(`升级指令下发失败: ${err.message}`, `Failed to trigger upgrade: ${err.message}`), 'warning');
-    }
+          setServerUpgradeProgress(t('镜像拉取就绪，服务正在平滑重启并无缝切换，即将完成...', 'Image ready, restarting service smoothly...'));
+
+          // 延迟 4 秒后开始轮询健康检测，等待服务重启就绪
+          setTimeout(() => {
+            let attempts = 0;
+            const maxAttempts = 30; // 最多轮询 75 秒
+            const pollInterval = setInterval(async () => {
+              attempts++;
+              try {
+                const info = await systemApi.getInfo();
+                if (info && info.database_path) {
+                  clearInterval(pollInterval);
+                  setServerUpgradeProgress(t('升级成功！页面正在自动刷新...', 'Upgrade completed! Refreshing page...'));
+                  triggerToast(t('服务端已平滑升级成功！', 'Server upgraded successfully!'), 'success');
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 1200);
+                }
+              } catch {
+                // 服务正在重启中，继续轮询
+                if (attempts >= maxAttempts) {
+                  clearInterval(pollInterval);
+                  setIsUpgradingServer(false);
+                  triggerToast(t('升级检测超时，请稍后手动刷新页面', 'Upgrade timeout, please refresh the page manually'), 'warning');
+                }
+              }
+            }, 2500);
+          }, 4000);
+
+        } catch (err: any) {
+          setIsUpgradingServer(false);
+          triggerToast(t(`升级指令下发失败: ${err.message}`, `Failed to trigger upgrade: ${err.message}`), 'warning');
+        }
+      }
+    });
   };
 
   // 触发单个 Agent 远程升级
@@ -2254,9 +2263,18 @@ export default function App() {
                                             </button>
                                             <button
                                               onClick={() => {
-                                                if (confirm(t(`确定注销 ${device.name} 及其隧道吗？此操作不会卸载远端容器，请另行执行客户端卸载命令。`, `Unregister '${device.name}' and its tunnels? This does not uninstall the remote container; run the client uninstall command separately.`))) {
-                                                  handleDeleteDevice(device.id, device.name);
-                                                }
+                                                showConfirm({
+                                                  title: t('注销设备确认', 'Unregister Device'),
+                                                  message: t(
+                                                    `确定注销设备 '${device.name}' 及其所有隧道吗？\n\n此操作将从管理面板中移除记录，但不会卸载远端容器；如需彻底清理，请在客户端机器另行执行卸载命令。`,
+                                                    `Unregister '${device.name}' and all its tunnels?\n\nThis removes the record from the panel but does not uninstall the remote container.`
+                                                  ),
+                                                  confirmText: t('确认注销', 'Confirm Unregister'),
+                                                  confirmType: 'danger',
+                                                  onConfirm: () => {
+                                                    handleDeleteDevice(device.id, device.name);
+                                                  }
+                                                });
                                               }}
                                               className="p-1 px-1.5 text-outline hover:text-status-offline rounded hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
                                               title={t('注销设备（不卸载远端容器）', 'Unregister device (keeps remote container)')}
@@ -2380,9 +2398,18 @@ export default function App() {
                                                                 </button>
                                                                 <button
                                                                   onClick={() => {
-                                                                    if (confirm(t(`确定卸载子渠道映射 ${tunnel.name} 吗？`, `Confirm release of sub-tunnel ${tunnel.name}?`))) {
-                                                                      handleDeleteTunnel(tunnel.id, tunnel.name);
-                                                                    }
+                                                                    showConfirm({
+                                                                      title: t('删除隧道确认', 'Delete Tunnel'),
+                                                                      message: t(
+                                                                        `确定删除穿透映射隧道 '${tunnel.name}' 吗？\n\n删除后该端口映射将立即在客户端与服务端注销关闭。`,
+                                                                        `Are you sure you want to delete tunnel '${tunnel.name}'?\n\nThe port mapping will be closed immediately.`
+                                                                      ),
+                                                                      confirmText: t('确认删除', 'Confirm Delete'),
+                                                                      confirmType: 'danger',
+                                                                      onConfirm: () => {
+                                                                        handleDeleteTunnel(tunnel.id, tunnel.name);
+                                                                      }
+                                                                    });
                                                                   }}
                                                                   className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                                                                   title={t('释放此子映射端口', 'Delete mapping')}
@@ -2766,10 +2793,10 @@ export default function App() {
                       initial="initial"
                       animate="animate"
                       exit="exit"
-                      className="min-h-screen bg-slate-600/10 backdrop-blur-sm fixed inset-0 z-50 flex items-center justify-center p-gutters shadow-[0_4px_30px_rgba(0,0,0,0.1)]"
+                      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
                     >
-                      <div className="bg-white w-full max-w-3xl rounded-xl border border-border-subtle flex flex-col p-8 relative shadow-lg mx-margin-mobile">
-                        {/* Header controls layout XPath match */}
+                      <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 flex flex-col p-6 shadow-2xl relative max-h-[85vh] overflow-y-auto text-left">
+                        {/* Header controls layout */}
                         <div className="flex items-start justify-between border-b border-border-subtle pb-4">
                           <div>
                             <h2 className="font-headline-md text-headline-md text-on-surface">{t('添加新设备', 'Add New Device')}</h2>
@@ -2779,7 +2806,7 @@ export default function App() {
                           <button 
                             aria-label="Close"
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-slate-50 cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                           >
                             <X className="w-5 h-5 shrink-0" />
                           </button>
@@ -2883,7 +2910,7 @@ export default function App() {
                         <div className="flex justify-end gap-3 border-t border-border-subtle pt-4">
                           <button 
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="px-4 py-2 bg-slate-100 text-on-surface-variant hover:bg-slate-200 text-xs font-semibold rounded cursor-pointer font-sans"
+                            className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-semibold rounded-lg cursor-pointer transition-colors font-sans"
                           >
                             {t('取消', 'Cancel')}
                           </button>
@@ -2898,9 +2925,9 @@ export default function App() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="min-h-screen bg-black/30 backdrop-blur-md fixed inset-0 z-50 flex items-center justify-center p-gutter shadow-2xl"
+                      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
                     >
-                      <div className="relative bg-white w-full max-w-2xl rounded-xl border border-border-subtle flex flex-col mx-margin-mobile shadow-[0_4px_24px_rgba(0,0,0,0.08)] text-left">
+                      <div className="relative bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 flex flex-col shadow-2xl text-left max-h-[85vh] overflow-y-auto">
                         {/* Header components */}
                         <div className="px-6 pt-6 pb-4 border-b border-border-subtle flex items-start justify-between">
                           <div>
@@ -2918,7 +2945,7 @@ export default function App() {
                           <button 
                             aria-label="关闭"
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded hover:bg-slate-50 cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                           >
                             <X className="w-5 h-5 shrink-0" />
                           </button>
@@ -3043,16 +3070,16 @@ export default function App() {
                         </div>
 
                         {/* Action controllers buttons */}
-                        <div className="px-6 py-4 border-t border-border-subtle bg-slate-50/50 flex justify-end items-center gap-3 rounded-b-xl">
+                        <div className="px-6 py-4 border-t border-border-subtle bg-slate-50/50 flex justify-end items-center gap-3 rounded-b-2xl">
                           <button 
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded text-xs font-semibold cursor-pointer"
+                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
                           >
                             {t('取消', 'Cancel')}
                           </button>
                           <button 
                             onClick={handleCompleteDeployment}
-                            className="px-5 py-2 bg-primary hover:bg-[#005166] text-white rounded text-xs font-semibold cursor-pointer shadow-sm"
+                            className="px-5 py-2 bg-primary hover:bg-[#005166] text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-colors"
                           >
                             {t('我已在客户端执行 (完成)', 'I Have Run the Command (Done)')}
                           </button>
@@ -3082,13 +3109,13 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
             >
               <motion.div
                 initial={{ scale: 0.95, y: 15 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 15 }}
-                className="bg-white w-full max-w-lg rounded-lg border border-border-subtle p-6 flex flex-col gap-4 shadow-lg text-left"
+                className="bg-white w-full max-w-lg rounded-2xl border border-slate-200/80 p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[85vh] overflow-y-auto"
               >
                 <div className="flex justify-between items-center border-b border-border-subtle pb-3">
                   <h3 className="font-headline font-semibold text-sm uppercase tracking-wider text-on-surface flex items-center gap-2">
@@ -3097,7 +3124,7 @@ export default function App() {
                   </h3>
                   <button 
                     onClick={() => setAddTunnelModalOpen(false)}
-                    className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -3281,13 +3308,13 @@ export default function App() {
                     <button 
                       type="button"
                       onClick={() => setAddTunnelModalOpen(false)}
-                      className="px-4 py-2 bg-slate-100 text-on-surface-variant hover:bg-slate-200 text-xs font-semibold rounded cursor-pointer font-sans"
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors font-sans"
                     >
                       {t('取消', 'Cancel')}
                     </button>
                     <button 
                       type="submit"
-                      className="bg-primary hover:bg-[#005166] text-white text-xs font-semibold py-2 px-5 rounded cursor-pointer font-sans"
+                      className="bg-primary hover:bg-[#005166] text-white text-xs font-semibold py-2 px-5 rounded-lg cursor-pointer font-sans shadow-sm transition-colors"
                     >
                       {t('确认创建映射', 'Confirm Mapping')}
                     </button>
@@ -3400,13 +3427,13 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
-              className="bg-white w-full max-w-2xl rounded-xl border border-border-subtle p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[85vh] overflow-y-auto"
+              className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[85vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center border-b border-border-subtle pb-3">
                 <div className="flex items-center gap-2">
@@ -3417,7 +3444,7 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => setUpdateModalOpen(false)}
-                  className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1 rounded hover:bg-slate-100"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -3549,7 +3576,7 @@ export default function App() {
               <div className="flex justify-end gap-3 border-t border-border-subtle pt-3">
                 <button
                   onClick={() => setUpdateModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded cursor-pointer"
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors"
                 >
                   {t('关闭', 'Close')}
                 </button>
@@ -3566,13 +3593,13 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 shadow-xl"
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
           >
             <motion.div
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
-              className="bg-white w-full max-w-lg rounded-xl border border-border-subtle p-6 flex flex-col gap-4 shadow-2xl text-left"
+              className="bg-white w-full max-w-lg rounded-2xl border border-slate-200/80 p-6 flex flex-col gap-4 shadow-2xl text-left"
             >
               <div className="flex justify-between items-center border-b border-border-subtle pb-3">
                 <div className="flex items-center gap-2">
@@ -3583,7 +3610,7 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => setUpgradeTargetDevice(null)}
-                  className="text-on-surface-variant hover:text-on-surface cursor-pointer p-1 rounded hover:bg-slate-100"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -3677,7 +3704,7 @@ export default function App() {
               <div className="flex justify-end gap-3 border-t border-border-subtle pt-3">
                 <button
                   onClick={() => setUpgradeTargetDevice(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded cursor-pointer"
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors"
                 >
                   {t('关闭', 'Close')}
                 </button>
@@ -3686,6 +3713,9 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* GLOBAL UNIFIED CONFIRMATION MODAL */}
+      <ConfirmModal dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
 
     </div>
   );
