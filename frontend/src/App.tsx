@@ -1266,9 +1266,10 @@ export default function App() {
               {/* Main Login Card */}
               <main className="w-full max-w-md bg-[#ffffff] border border-border-subtle z-10 flex flex-col items-center p-12 shadow-sm rounded">
                 {/* Logo / Branding */}
-                <div className="flex flex-col items-center mb-10">
+                <div className="flex flex-col items-center mb-8">
+                  <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-16 h-16 mb-3 drop-shadow-sm rounded-2xl" />
                   <h1 className="font-headline font-semibold text-2xl text-primary text-center tracking-tight">FRP-ALL-IN-ONE</h1>
-                  <p className="font-mono text-xs text-on-surface-variant mt-2 bg-surface-container-high px-2 py-0.5 rounded font-semibold">{APP_VERSION_DISPLAY}</p>
+                  <p className="font-mono text-xs text-on-surface-variant mt-1.5 bg-surface-container-high px-2 py-0.5 rounded font-semibold">{APP_VERSION_DISPLAY}</p>
                 </div>
                 
                 {/* Action Area */}
@@ -1618,9 +1619,7 @@ export default function App() {
                 <div className="flex flex-col">
                   {/* Brand Block Reference to Mock HTML layout */}
                   <div className="mb-8 px-2 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded bg-primary-container flex items-center justify-center text-on-primary-container shrink-0 shadow-sm bg-sky-500/10 text-[#006782]">
-                      <Terminal className="w-4 h-4" />
-                    </div>
+                    <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
                     <div>
                       <h1 className="font-headline font-black text-[#006782] text-sm tracking-tight leading-none">
                         FRP-ALL-IN-ONE
@@ -1749,7 +1748,7 @@ export default function App() {
                     </button>
                     {!mobileMenuOpen && (
                       <div className="flex items-center gap-2 lg:hidden">
-                        <Terminal className="w-4 h-4 text-[#006782]" />
+                        <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-5 h-5 rounded shrink-0" />
                         <span className="font-headline font-semibold text-sm tracking-tight text-on-surface">FRP-ALL-IN-ONE</span>
                       </div>
                     )}

@@ -1,0 +1,25 @@
+{
+  "name": "FRP-ALL-IN-ONE",
+  "short_name": "FRP",
+  "description": "基于 Web 的全容器化 FRP 内网穿透集中管理系统",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "theme_color": "#006782",
+  "background_color": "#f7f9fb",
+  "display": "standalone"
+}
