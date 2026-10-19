@@ -1,14 +1,19 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertTriangle, Trash2, ArrowUpCircle, X } from 'lucide-react';
+import { AlertTriangle, Trash2, ArrowUpCircle, Edit3, X } from 'lucide-react';
 
 export interface ConfirmDialogOptions {
   title: string;
-  message: string;
+  message?: string;
   confirmText?: string;
   cancelText?: string;
   confirmType?: 'primary' | 'danger' | 'warning';
-  onConfirm: () => void | Promise<void>;
+  showInput?: boolean;
+  inputDefaultValue?: string;
+  inputPlaceholder?: string;
+  inputLabel?: string;
+  onConfirm?: () => void | Promise<void>;
+  onConfirmInput?: (val: string) => void | Promise<void>;
 }
 
 interface ConfirmModalProps {
@@ -17,7 +22,14 @@ interface ConfirmModalProps {
 }
 
 export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) => {
-  const [loading, setLoading] = React.useState(false);
+  const [loading, setLoading] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+
+  useEffect(() => {
+    if (dialog?.showInput) {
+      setInputValue(dialog.inputDefaultValue || '');
+    }
+  }, [dialog]);
 
   if (!dialog) return null;
 
@@ -27,22 +39,38 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) =
     confirmText = '确定',
     cancelText = '取消',
     confirmType = 'primary',
+    showInput = false,
+    inputPlaceholder = '',
+    inputLabel = '',
     onConfirm,
+    onConfirmInput,
   } = dialog;
 
   const handleConfirm = async () => {
     try {
       setLoading(true);
-      await onConfirm();
+      if (showInput && onConfirmInput) {
+        await onConfirmInput(inputValue);
+      } else if (onConfirm) {
+        await onConfirm();
+      }
       onClose();
     } catch {
-      // 错误由 onConfirm 自身处理
+      // 错误由调用方自行处理
     } finally {
       setLoading(false);
     }
   };
 
   const getIcon = () => {
+    if (showInput) {
+      return (
+        <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-200 flex items-center justify-center text-[#006782] shrink-0">
+          <Edit3 className="w-5 h-5" />
+        </div>
+      );
+    }
+
     switch (confirmType) {
       case 'danger':
         return (
@@ -106,10 +134,41 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) =
             </button>
           </div>
 
-          {/* Body */}
-          <div className="text-xs text-slate-600 leading-relaxed whitespace-pre-line bg-slate-50 border border-slate-100 p-3.5 rounded-xl font-sans">
-            {message}
-          </div>
+          {/* Message (if any) */}
+          {message && (
+            <div className="text-xs text-slate-600 leading-relaxed whitespace-pre-line bg-slate-50 border border-slate-100 p-3.5 rounded-xl font-sans">
+              {message}
+            </div>
+          )}
+
+          {/* Prompt Input Form (if showInput) */}
+          {showInput && (
+            <div className="flex flex-col gap-1.5 pt-1">
+              {inputLabel && (
+                <label className="text-xs font-semibold text-slate-700 font-sans">
+                  {inputLabel}
+                </label>
+              )}
+              <input
+                type="text"
+                autoFocus
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleConfirm();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    onClose();
+                  }
+                }}
+                placeholder={inputPlaceholder}
+                className="w-full border border-slate-300 rounded-xl py-2 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] font-mono bg-white shadow-inner"
+              />
+            </div>
+          )}
 
           {/* Footer Buttons */}
           <div className="flex justify-end items-center gap-2.5 pt-1">
@@ -124,8 +183,10 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) =
             <button
               type="button"
               onClick={handleConfirm}
-              disabled={loading}
-              className={`px-5 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-all flex items-center gap-1.5 ${getConfirmButtonClass()}`}
+              disabled={loading || (showInput && !inputValue.trim())}
+              className={`px-5 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-all flex items-center gap-1.5 ${
+                showInput && !inputValue.trim() ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : getConfirmButtonClass()
+              }`}
             >
               {loading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               <span>{confirmText}</span>

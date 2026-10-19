@@ -983,23 +983,28 @@ export default function App() {
     triggerToast(t(`已注销设备 '${deviceName}' 及关联隧道；远端容器请使用卸载命令移除。`, `Device '${deviceName}' and its tunnels were unregistered. Remove the remote container using the uninstall command.`), 'warning');
   };
 
-  const handleEditDeviceName = async (device: Device) => {
-    let nextName: string | null = null;
-    try {
-      nextName = prompt(t('请输入新的设备主机名称:', 'Please enter the new device hostname:'), device.name);
-    } catch (_e) {
-      void _e;
-    }
-
-    if (nextName !== null && nextName.trim()) {
-      try {
-        await clientsApi.updateName(device.id, nextName.trim());
-        setDevices(prev => prev.map(d => d.id === device.id ? { ...d, name: nextName!.trim() } : d));
-        triggerToast(t('设备主机名称修改成功!', 'Device hostname updated successfully!'), 'success');
-      } catch (err: any) {
-        triggerToast(`修改失败: ${err.message}`, 'warning');
+  const handleEditDeviceName = (device: Device) => {
+    showConfirm({
+      title: t('修改设备主机名称', 'Edit Device Hostname'),
+      message: t('主机名用于在面板中标识此设备，修改后隧道的代理别名将自动同步。', 'The hostname identifies this device. Updating it syncs the proxy alias automatically.'),
+      confirmText: t('保存修改', 'Save Changes'),
+      cancelText: t('取消', 'Cancel'),
+      showInput: true,
+      inputDefaultValue: device.name,
+      inputPlaceholder: t('请输入新的设备主机名称', 'Enter new hostname'),
+      inputLabel: t('设备主机名 (Hostname)', 'Device Hostname'),
+      onConfirmInput: async (nextName: string) => {
+        const trimmed = nextName.trim();
+        if (!trimmed || trimmed === device.name) return;
+        try {
+          await clientsApi.updateName(device.id, trimmed);
+          setDevices(prev => prev.map((d: Device) => d.id === device.id ? { ...d, name: trimmed } : d));
+          triggerToast(t('设备主机名称修改成功!', 'Device hostname updated successfully!'), 'success');
+        } catch (err: any) {
+          triggerToast(`修改失败: ${err.message}`, 'warning');
+        }
       }
-    }
+    });
   };
 
   const toggleDeviceExpanded = (deviceId: string) => {
@@ -3143,7 +3148,7 @@ export default function App() {
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-mono text-outline uppercase font-semibold">{t('绑定目标客户端设备', 'Target Client Device')}</label>
                     <select 
-                      className="w-full border border-border-subtle rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary h-[34px] bg-white text-on-surface font-sans"
+                      className="w-full border border-slate-300 rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] h-[36px] bg-white text-slate-800 font-sans shadow-sm"
                       value={newTunnelData.deviceId}
                       onChange={(e) => {
                         const nextDevId = e.target.value;
@@ -3167,7 +3172,7 @@ export default function App() {
                       <label className="text-xs font-mono text-outline uppercase font-semibold">{t('服务通道名称 (Proxy Name)', 'Proxy Name')}</label>
                       <input 
                         type="text"
-                        className="w-full border border-border-subtle rounded py-1.5 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                        className="w-full border border-slate-300 rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] font-mono bg-white shadow-sm text-slate-800"
                         value={newTunnelData.name}
                         onChange={(e) => setNewTunnelData(p => ({ ...p, name: e.target.value }))}
                         required
@@ -3177,7 +3182,7 @@ export default function App() {
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-mono text-outline uppercase font-semibold">{t('传输层协议', 'Protocol')}</label>
                       <select 
-                        className="w-full border border-border-subtle rounded py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary h-[34px] bg-white text-on-surface font-sans"
+                        className="w-full border border-slate-300 rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] h-[36px] bg-white text-slate-800 font-sans shadow-sm"
                         value={newTunnelData.type}
                         onChange={(e) => setNewTunnelData(p => ({ ...p, type: e.target.value as any }))}
                       >
@@ -3207,7 +3212,7 @@ export default function App() {
                       </div>
                       <input 
                         type="text"
-                        className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        className="w-full border border-slate-300 rounded-xl py-2 px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] font-mono bg-white shadow-sm text-slate-800"
                         value={newTunnelData.localIp}
                         onChange={(e) => setNewTunnelData(p => ({ ...p, localIp: e.target.value }))}
                         placeholder={modalDetectedHostIp || "127.0.0.1"}
@@ -3218,7 +3223,7 @@ export default function App() {
                       <label className="text-[10px] text-outline uppercase font-semibold">{t('局域网端口', 'Local Port')}</label>
                       <input 
                         type="number"
-                        className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        className="w-full border border-slate-300 rounded-xl py-2 px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] font-mono bg-white shadow-sm text-slate-800"
                         value={newTunnelData.localPort}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -3234,7 +3239,7 @@ export default function App() {
                       <label className="text-[10px] text-outline uppercase font-semibold">{t('服务端映射端口', 'Remote Port')}</label>
                       <input 
                         type="number"
-                        className="w-full border border-border-subtle rounded py-1 px-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        className="w-full border border-slate-300 rounded-xl py-2 px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] font-mono bg-white shadow-sm text-slate-800"
                         value={newTunnelData.remotePort}
                         onChange={(e) => {
                           const val = e.target.value;

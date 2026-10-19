@@ -19,9 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '发布版本号 (如 v3.2.4)'
+        description: '发布版本号 (如 v3.2.5)'
         required: true
-        default: 'v3.2.4'
+        default: 'v3.2.5'
 
   push:
     branches:
