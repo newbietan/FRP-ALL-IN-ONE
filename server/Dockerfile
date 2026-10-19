@@ -3,7 +3,7 @@
 # ==============================================================================
 
 # ---- 阶段 1: 编译前端 React 静态资源 ----
-FROM node:22-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 WORKDIR /build
 COPY frontend/package*.json ./
 RUN npm ci
@@ -11,11 +11,13 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- 阶段 2: 编译定制版 FRPS 服务端核心 (Go 1.26) ----
-FROM golang:1.26-alpine AS frps-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS frps-builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /build
 COPY core/ /build/core/
 WORKDIR /build/core/frp_custom
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /build/frps ./cmd/frps
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /build/frps ./cmd/frps
 
 # ---- 阶段 3: Python 运行环境与整体组装 ----
 FROM python:3.11-slim

@@ -18,8 +18,8 @@ printf '{"auths":{}}\n' > "$auth_dir/config.json"
 for image in "$@"; do
     pulled=false
     for attempt in 1 2 3; do
-        echo "[CHECK] 匿名拉取 $image（$attempt/3）"
-        if docker --config "$auth_dir" pull "$image"; then
+        echo "[CHECK] 匿名拉取 $image (amd64 + arm64)（$attempt/3）"
+        if docker --config "$auth_dir" pull "$image" && docker --config "$auth_dir" pull --platform linux/arm64 "$image"; then
             pulled=true
             break
         fi
@@ -28,9 +28,9 @@ for image in "$@"; do
         fi
     done
     if [ "$pulled" != true ]; then
-        echo "[ERROR] 无法匿名拉取 $image。请检查标签是否存在、网络状态，以及腾讯云控制台中该镜像仓库是否为公开。" >&2
+        echo "[ERROR] 无法匿名拉取 $image (amd64 / arm64)。请检查标签是否存在、多架构 manifest 是否完整，以及腾讯云控制台中该镜像仓库是否为公开。" >&2
         echo "[ERROR] 推送成功不代表镜像公开；不要要求最终用户配置 TCR_USERNAME/TCR_PASSWORD。" >&2
         exit 1
     fi
-    echo "[OK] $image 匿名拉取成功"
+    echo "[OK] $image (amd64 + arm64) 匿名拉取成功"
 done

@@ -60,6 +60,7 @@ import {
 import { APP_VERSION_DISPLAY } from './version';
 import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, agentsApi, isLoggedIn, setToken, clearToken } from './api';
 import { dashboardWs } from './ws';
+import { MarkdownView } from './components/MarkdownView';
 
 // Navigation transitions simulation mapping
 const animationVariants = {
@@ -719,7 +720,7 @@ export default function App() {
                 window.location.reload();
               }, 1200);
             }
-          } catch (_e) {
+          } catch {
             // 服务正在重启中，继续轮询
             if (attempts >= maxAttempts) {
               clearInterval(pollInterval);
@@ -3458,8 +3459,8 @@ export default function App() {
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-mono">
                     {t('更新日志 (Release Notes)', 'Release Notes')}
                   </h4>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 text-xs text-slate-700 max-h-48 overflow-y-auto font-mono whitespace-pre-wrap leading-relaxed">
-                    {updateInfo.release_notes}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 text-xs text-slate-700 max-h-56 overflow-y-auto leading-relaxed">
+                    <MarkdownView content={updateInfo.release_notes} />
                   </div>
                 </div>
               )}
@@ -3532,7 +3533,7 @@ export default function App() {
                       {t(`共连接 ${devices.length} 台设备，其中 ${outdatedDevices.length} 台可升级`, `${devices.length} devices total, ${outdatedDevices.length} can be upgraded`)}
                     </p>
                   </div>
-                  {outdatedDevices.length > 0 && (
+                    {outdatedDevices.length > 0 && (
                     <button
                       onClick={handleBatchUpgradeAgents}
                       disabled={batchUpgrading}
@@ -3541,18 +3542,6 @@ export default function App() {
                       <Sparkles className="w-3.5 h-3.5" />
                       <span>{batchUpgrading ? t('正在下发...', 'Sending...') : t('批量下发升级信号', 'Broadcast Upgrade')}</span>
                     </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Watchtower Zero-Touch Tip */}
-              <div className="bg-slate-100 border border-slate-200 rounded p-3 text-[11px] text-slate-600 flex items-start gap-2">
-                <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-                <div className="leading-relaxed">
-                  <span className="font-semibold text-slate-800">{t('全自动零感知升级 (Watchtower): ', 'Zero-Touch Automatic Upgrade: ')}</span>
-                  {t(
-                    '服务端 compose.yml 及客户端容器已预先打上 Watchtower 标签。如需全自动静默升级，只需在服务端执行 docker compose --profile auto-update up -d，每次云端镜像推送后将在后台平滑更新。',
-                    'Watchtower labels are pre-configured. Run docker compose --profile auto-update up -d for silent background updates.'
                   )}
                 </div>
               </div>
