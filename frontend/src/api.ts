@@ -92,6 +92,7 @@ export const authApi = {
 export interface ClientData {
   id: string;
   name: string;
+  remark?: string | null;
   auth_token: string;
   status: 'online' | 'offline';
   last_seen: string;
@@ -142,6 +143,11 @@ export const clientsApi = {
   /** 更新客户端名称 */
   updateName(clientId: string, name: string) {
     return request<ClientData>('PATCH', `/api/clients/${clientId}`, { name });
+  },
+
+  /** 更新客户端备注 */
+  updateRemark(clientId: string, remark: string | null) {
+    return request<ClientData>('PATCH', `/api/clients/${clientId}`, { remark });
   },
 
   /** 删除客户端 */
@@ -395,5 +401,10 @@ export const agentsApi = {
       upgraded_count: number;
       details: Array<{ client_id: string; name: string; signal_sent: boolean }>;
     }>('POST', '/api/agents/batch-upgrade');
+  },
+
+  /** 获取指定 Agent 最近升级反馈状态 */
+  getUpgradeStatus(clientId: string) {
+    return request<{ client_id: string; status: Record<string, unknown> | null }>('GET', `/api/agents/${clientId}/upgrade-status`);
   },
 };

@@ -15,6 +15,7 @@ export type OS = 'linux' | 'windows' | 'macos';
 export interface Device {
   id: string;
   name: string;
+  remark?: string | null;
   os: OS;
   ip: string;
   ips?: string[];

@@ -3,15 +3,15 @@
 """
 import json
 
-import crud
-import models
-import schemas
-from database import SessionLocal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from websocket_manager import manager as ws_manager
 
 from core import get_current_user, get_db
+import crud
+from database import SessionLocal
+import models
+import schemas
+from websocket_manager import manager as ws_manager
 
 router = APIRouter(prefix="/clients", tags=["客户端管理"])
 
@@ -118,7 +118,7 @@ async def _push_config_for_client(client_id: str):
         toml = _render_frpc_toml(db, client)
         if not toml:
             return False
-        
+
         ok = await ws_manager.push_config_to_agent(client_id, toml)
         await _broadcast_dashboard_sync(db)
         return ok
@@ -173,7 +173,7 @@ async def delete_client_endpoint(
     ok = crud.delete_client(db, client_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Client not found")
-    
+
     await _broadcast_dashboard_sync(db)
     return {"success": True}
 
@@ -185,15 +185,21 @@ async def update_client(
     db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
-    """更新客户端名称"""
-    name = payload.name
-    updated = crud.update_client_name(db, client_id=client_id, new_name=name)
-    if not updated:
+    """更新客户端名称与备注"""
+    client = crud.get_client(db, client_id=client_id)
+    if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    
-    # 客户端名称修改会影响隧道的代理名称，需要重新推送配置
-    await _push_config_for_client(client_id)
-    return updated
+
+    if payload.name is not None and payload.name.strip():
+        crud.update_client_name(db, client_id=client_id, new_name=payload.name.strip())
+        await _push_config_for_client(client_id)
+    if payload.remark is not None:
+        crud.update_client_remark(db, client_id=client_id, new_remark=payload.remark)
+
+    db.refresh(client)
+    client.agent_info = _build_client_agent_info(db, client_id)
+    await _broadcast_dashboard_sync(db)
+    return client
 
 
 @router.post("/{client_id}/tunnels/", response_model=schemas.Tunnel)

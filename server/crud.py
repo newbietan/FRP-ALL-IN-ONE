@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import secrets
 import time
-from typing import Any
 import uuid
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -166,6 +166,15 @@ def update_client_name(db: Session, client_id: str, new_name: str) -> models.Cli
     if not client:
         return None
     client.name = new_name
+    db.commit()
+    db.refresh(client)
+    return client
+
+def update_client_remark(db: Session, client_id: str, new_remark: str | None) -> models.Client | None:
+    client = get_client(db, client_id=client_id)
+    if not client:
+        return None
+    client.remark = new_remark.strip() if new_remark and new_remark.strip() else None
     db.commit()
     db.refresh(client)
     return client

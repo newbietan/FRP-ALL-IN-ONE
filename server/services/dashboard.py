@@ -27,6 +27,7 @@ def build_full_sync_data(db) -> dict:
         client_data = {
             "id": c.id,
             "name": c.name,
+            "remark": getattr(c, "remark", None),
             "auth_token": c.auth_token,
             "status": c.status,
             "last_seen": c.last_seen,

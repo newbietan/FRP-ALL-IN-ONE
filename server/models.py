@@ -56,6 +56,7 @@ class Client(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)  # UUID
     name: Mapped[str] = mapped_column(String, index=True)
+    remark: Mapped[str | None] = mapped_column(String, nullable=True)  # 用户自定义备注名称
     auth_token: Mapped[str] = mapped_column(String)  # For Agent to authenticate
     status: Mapped[str] = mapped_column(String, default="offline")  # online/offline
     last_seen: Mapped[int] = mapped_column(Integer, default=0)  # Timestamp

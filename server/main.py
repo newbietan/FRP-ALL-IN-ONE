@@ -50,6 +50,12 @@ def _auto_migrate_db(bind_engine):
                 conn.exec_driver_sql("ALTER TABLE agent_info ADD COLUMN ip VARCHAR")
             if cols and "ips" not in cols:
                 conn.exec_driver_sql("ALTER TABLE agent_info ADD COLUMN ips VARCHAR")
+
+            client_res = conn.exec_driver_sql("PRAGMA table_info(clients)").fetchall()
+            client_cols = {r[1] for r in client_res}
+            if client_cols and "remark" not in client_cols:
+                conn.exec_driver_sql("ALTER TABLE clients ADD COLUMN remark VARCHAR")
+
             conn.commit()
     except Exception as e:
         print(f"[WARN] 数据库自动迁移检查异常: {e}")
@@ -416,7 +422,7 @@ async def _handle_agent_message(client_id: str, msg: dict):
 
             if hostname:
                 client = crud.get_client(db, client_id=client_id)
-                if client and client.name != hostname:
+                if client and (client.name.startswith("device-") or not client.name):
                     crud.update_client_name(db, client_id=client_id, new_name=hostname)
 
             agent = db.query(models.AgentInfo).filter(
@@ -543,6 +549,15 @@ async def _handle_agent_message(client_id: str, msg: dict):
 
     elif msg_type == "log":
         await ws_manager.broadcast_log(client_id, str(data) if data is not None else "")
+
+    elif msg_type == "upgrade_status":
+        raw = data if isinstance(data, dict) else {}
+        ws_manager.update_agent_upgrade_status(client_id, raw)
+        await ws_manager.broadcast_dashboard({
+            "type": "agent_upgrade_status",
+            "client_id": client_id,
+            "data": ws_manager.get_agent_upgrade_status(client_id),
+        })
 
     elif msg_type == "frpc_status":
         db = SessionLocal()

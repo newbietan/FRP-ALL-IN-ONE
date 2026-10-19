@@ -191,6 +191,7 @@ export default function App() {
   const [serverUpgradeError, setServerUpgradeError] = useState('');
   const [upgradeCapability, setUpgradeCapability] = useState<{ can_self_upgrade: boolean; reason: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogOptions | null>(null);
+  const [agentUpgradeStatuses, setAgentUpgradeStatuses] = useState<Record<string, { status: string; message: string; updated_at?: string }>>({});
 
   const showConfirm = (opts: ConfirmDialogOptions) => {
     setConfirmDialog(opts);
@@ -495,12 +496,23 @@ export default function App() {
     dashboardWs.on('frps_status', handleFrpsStatus);
     dashboardWs.on('log', handleLog);
 
+    const handleAgentUpgradeStatus = (data: any) => {
+      if (data?.client_id && data?.data) {
+        setAgentUpgradeStatuses(prev => ({
+          ...prev,
+          [data.client_id]: data.data,
+        }));
+      }
+    };
+    dashboardWs.on('agent_upgrade_status', handleAgentUpgradeStatus);
+
     return () => {
       dashboardWs.off('full_sync', handleFullSync);
       dashboardWs.off('metrics_update', handleMetricsUpdate);
       dashboardWs.off('client_event', handleClientEvent);
       dashboardWs.off('frps_status', handleFrpsStatus);
       dashboardWs.off('log', handleLog);
+      dashboardWs.off('agent_upgrade_status', handleAgentUpgradeStatus);
     };
   }, []);
 
@@ -518,6 +530,7 @@ export default function App() {
     return {
       id: client.id,
       name: agent.hostname || client.name || client.id,
+      remark: client.remark || null,
       os,
       ip: detectedIp || '未知',
       ips: ipsList,
@@ -779,6 +792,27 @@ export default function App() {
       const res = await agentsApi.upgrade(device.id);
       if (res.signal_sent) {
         triggerToast(t(`已向客户端 '${device.name}' 下发远程升级信号！`, `Upgrade signal sent to '${device.name}'!`), 'success');
+        setAgentUpgradeStatuses(prev => ({
+          ...prev,
+          [device.id]: {
+            status: 'acknowledged',
+            message: t('升级指令已下发至客户端 WebSocket 信道，客户端已确认收到', 'Upgrade signal dispatched over WebSocket, agent acknowledged'),
+            updated_at: new Date().toISOString(),
+          }
+        }));
+        setTimeout(async () => {
+          try {
+            const st = await agentsApi.getUpgradeStatus(device.id);
+            if (st.status) {
+              setAgentUpgradeStatuses(prev => ({
+                ...prev,
+                [device.id]: st.status as any,
+              }));
+            }
+          } catch {
+            // ignore
+          }
+        }, 1500);
       } else {
         triggerToast(t('客户端离线，请复制升级命令在宿主机执行', 'Client offline. Copy and run the command on host.'), 'info');
       }
@@ -1000,25 +1034,40 @@ export default function App() {
     triggerToast(t(`已注销设备 '${deviceName}' 及关联隧道；远端容器请使用卸载命令移除。`, `Device '${deviceName}' and its tunnels were unregistered. Remove the remote container using the uninstall command.`), 'warning');
   };
 
+  /** 获取设备格式化名称：如 "ubuntu（这是备注名）" 或 "ubuntu" */
+  const formatDeviceDisplayName = (device: { name: string; remark?: string | null }) => {
+    if (device.remark && device.remark.trim()) {
+      return `${device.name}（${device.remark.trim()}）`;
+    }
+    return device.name;
+  };
+
   const handleEditDeviceName = (device: Device) => {
     showConfirm({
-      title: t('修改设备主机名称', 'Edit Device Hostname'),
-      message: t('主机名用于在面板中标识此设备，修改后隧道的代理别名将自动同步。', 'The hostname identifies this device. Updating it syncs the proxy alias automatically.'),
-      confirmText: t('保存修改', 'Save Changes'),
+      title: t('修改设备备注', 'Edit Device Remark'),
+      message: t(
+        `为设备 '${device.name}' 设置备注名称，设置后将在面板展示为 “${device.name}（备注名）”。`,
+        `Set a custom remark for '${device.name}'. It will be displayed as "${device.name} (Remark)".`
+      ),
+      confirmText: t('保存备注', 'Save Remark'),
       cancelText: t('取消', 'Cancel'),
       showInput: true,
-      inputDefaultValue: device.name,
-      inputPlaceholder: t('请输入新的设备主机名称', 'Enter new hostname'),
-      inputLabel: t('设备主机名 (Hostname)', 'Device Hostname'),
-      onConfirmInput: async (nextName: string) => {
-        const trimmed = nextName.trim();
-        if (!trimmed || trimmed === device.name) return;
+      inputDefaultValue: device.remark || '',
+      inputPlaceholder: t('请输入设备备注名（留空则清除备注）', 'Enter device remark or leave blank to clear'),
+      inputLabel: t('设备备注名 (Remark)', 'Device Remark'),
+      onConfirmInput: async (nextRemark: string) => {
+        const trimmed = nextRemark.trim();
         try {
-          await clientsApi.updateName(device.id, trimmed);
-          setDevices(prev => prev.map((d: Device) => d.id === device.id ? { ...d, name: trimmed } : d));
-          triggerToast(t('设备主机名称修改成功!', 'Device hostname updated successfully!'), 'success');
+          await clientsApi.updateRemark(device.id, trimmed ? trimmed : null);
+          setDevices(prev => prev.map((d: Device) => d.id === device.id ? { ...d, remark: trimmed ? trimmed : null } : d));
+          triggerToast(
+            trimmed
+              ? t(`设备备注已更新为: ${trimmed}`, `Remark updated to: ${trimmed}`)
+              : t('已清除设备备注', 'Device remark cleared'),
+            'success'
+          );
         } catch (err: any) {
-          triggerToast(`修改失败: ${err.message}`, 'warning');
+          triggerToast(`修改备注失败: ${err.message}`, 'warning');
         }
       }
     });
@@ -1885,7 +1934,7 @@ export default function App() {
                                       )}
                                     </td>
                                     <td className="py-3 px-4 font-mono text-xs font-bold text-on-surface">
-                                      {device.name}
+                                      {formatDeviceDisplayName(device)}
                                     </td>
                                     <td className="py-3 px-4 text-on-surface-variant font-mono text-[11px] hidden md:table-cell">
                                       <span className="capitalize">{device.os}</span>/{device.arch || 'amd64'}
@@ -2203,7 +2252,7 @@ export default function App() {
                                         
                                         <td className="py-4 px-4">
                                           <div className="font-mono text-xs font-semibold text-[#1e293b] flex items-center gap-2">
-                                            {device.name}
+                                            <span>{formatDeviceDisplayName(device)}</span>
                                             {device.hasUpdate && (
                                               <span
                                                 onClick={(e) => {
@@ -2288,7 +2337,7 @@ export default function App() {
                                             <button
                                               onClick={() => handleEditDeviceName(device)}
                                               className="p-1 px-1.5 text-outline hover:text-primary rounded hover:bg-slate-100 transition-colors cursor-pointer"
-                                              title={t('修改设备主机名', 'Edit Device Hostname')}
+                                              title={t('修改设备备注', 'Edit Device Remark')}
                                             >
                                               <Sliders className="w-3.5 h-3.5" />
                                             </button>
@@ -3709,6 +3758,32 @@ export default function App() {
                 <p className="text-[11px] text-sky-700">
                   {t('通过 WebSocket 向正在运行的 Agent 容器发送更新请求', 'Send update signal over WebSocket to the running agent')}
                 </p>
+
+                {/* 客户端实时回传反馈卡片 */}
+                {agentUpgradeStatuses[upgradeTargetDevice.id] && (
+                  <div className="p-2.5 bg-white border border-sky-300 rounded-lg flex flex-col gap-1 text-xs shadow-sm">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-sky-900 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>{t('客户端反馈: ', 'Agent Feedback: ')}</span>
+                        <span className="text-emerald-700 font-mono font-bold">
+                          {agentUpgradeStatuses[upgradeTargetDevice.id].status === 'acknowledged'
+                            ? t('已确认收到', 'Acknowledged')
+                            : agentUpgradeStatuses[upgradeTargetDevice.id].status}
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {agentUpgradeStatuses[upgradeTargetDevice.id].updated_at
+                          ? new Date(agentUpgradeStatuses[upgradeTargetDevice.id].updated_at!).toLocaleTimeString()
+                          : t('刚刚', 'Just now')}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-700 bg-slate-50 p-1.5 rounded font-mono">
+                      {agentUpgradeStatuses[upgradeTargetDevice.id].message || t('客户端已接收升级指令', 'Agent received upgrade command')}
+                    </p>
+                  </div>
+                )}
+
                 <button
                   onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
                   disabled={upgradingDevice || upgradeTargetDevice.status !== 'online'}
@@ -3721,6 +3796,13 @@ export default function App() {
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>{upgradingDevice ? t('下发中...', 'Sending...') : t('发送远程升级信号', 'Send Upgrade Signal')}</span>
                 </button>
+
+                <div className="text-[10px] text-slate-500 bg-white/70 p-2 rounded border border-slate-200/80 leading-normal">
+                  {t(
+                    '说明：若客户端已挂载 Docker Socket，容器将在接收信号后自动拉取镜像并完成重启；若未挂载，建议直接使用下方的【方式二】一键升级命令。',
+                    'Notice: If the agent container has Docker Socket mounted, it self-upgrades automatically. Otherwise, please use Method 2 below.'
+                  )}
+                </div>
               </div>
 
               {/* Method 2: Host One-Click Command */}
