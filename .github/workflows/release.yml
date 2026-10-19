@@ -87,7 +87,7 @@ jobs:
             LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" \
               --sort=-v:refname | head -n 1)
             if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG="v3.2.5"
+              LATEST_TAG="v3.2.9"
             fi
             echo ">> 检测到最新语义化标签: ${LATEST_TAG}"
 
@@ -110,10 +110,10 @@ jobs:
           echo ">> 最终生效版本: ${VERSION} (纯数字: ${VERSION_NUM})"
 
   # ===========================
-  # 阶段 2: 编译 Agent 客户端全平台二进制并发布 GitHub Release
+  # 阶段 2: 编译 Agent 客户端全平台二进制产物
   # ===========================
-  release-agent:
-    name: Build & Release Agent (${{ needs.resolve-version.outputs.version }})
+  build-agent:
+    name: Build Agent Binaries (${{ needs.resolve-version.outputs.version }})
     needs: resolve-version
     if: needs.resolve-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
@@ -167,45 +167,19 @@ jobs:
         working-directory: ./agent/dist
         run: sha256sum frp-agent-* > SHA256SUMS
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload agent binaries artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ needs.resolve-version.outputs.version }}
-          name: FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
-          body: |
-            ## FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
-
-            ### 客户端 Agent 二进制直链下载：
-            | 文件名 | 平台架构 | 说明 |
-            | :--- | :--- | :--- |
-            | `frp-agent-linux-amd64` | Linux x64 | 适用于主流 Linux |
-            | `frp-agent-linux-arm64` | Linux ARM64 | 适用于 ARM 服务器 |
-            | `frp-agent-darwin-amd64` | macOS Intel | 适用于 Intel Mac |
-            | `frp-agent-darwin-arm64` | macOS Apple Silicon | 适用于 Apple M 芯片 |
-            | `frp-agent-windows-amd64.exe` | Windows x64 | 适用于 Windows |
-
-            ### 容器镜像已同步发布至腾讯云 TCR (双架构)：
-            - 服务端: `frp-server:${{ needs.resolve-version.outputs.version }}`
-            - 客户端: `frp-agent:${{ needs.resolve-version.outputs.version }}`
-          files: |
-            agent/dist/frp-agent-linux-amd64
-            agent/dist/frp-agent-linux-arm64
-            agent/dist/frp-agent-darwin-amd64
-            agent/dist/frp-agent-darwin-arm64
-            agent/dist/frp-agent-windows-amd64.exe
-            agent/dist/SHA256SUMS
-          draft: false
-          prerelease: false
-          make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: agent-dist-${{ needs.resolve-version.outputs.version }}
+          path: agent/dist/
+          retention-days: 1
 
   # ===========================
   # 阶段 3: 构建并推送多架构容器镜像至腾讯云 TCR
   # ===========================
   build-and-push-docker:
     name: Build & Push Docker
-    needs: [resolve-version, release-agent]
+    needs: [resolve-version, build-agent]
     if: needs.resolve-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -280,3 +254,51 @@ jobs:
           image="$REGISTRY/$NAMESPACE/$IMAGE_NAME"
           images=("$image:$IMAGE_TAG" "$image:latest")
           bash deploy/check-public-images.sh "${images[@]}"
+
+  # ===========================
+  # 阶段 5: 所有多架构镜像验证就绪后，公开发布 GitHub Release
+  # ===========================
+  publish-release:
+    name: Publish GitHub Release (${{ needs.resolve-version.outputs.version }})
+    needs: [resolve-version, build-agent, verify-public-images]
+    if: needs.resolve-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download agent binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-dist-${{ needs.resolve-version.outputs.version }}
+          path: agent/dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-version.outputs.version }}
+          name: FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
+          body: |
+            ## FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
+
+            ### 客户端 Agent 二进制直链下载：
+            | 文件名 | 平台架构 | 说明 |
+            | :--- | :--- | :--- |
+            | `frp-agent-linux-amd64` | Linux x64 | 适用于主流 Linux |
+            | `frp-agent-linux-arm64` | Linux ARM64 | 适用于 ARM 服务器 |
+            | `frp-agent-darwin-amd64` | macOS Intel | 适用于 Intel Mac |
+            | `frp-agent-darwin-arm64` | macOS Apple Silicon | 适用于 Apple M 芯片 |
+            | `frp-agent-windows-amd64.exe` | Windows x64 | 适用于 Windows |
+
+            ### 容器镜像已同步发布至腾讯云 TCR (双架构已通过拉取验证)：
+            - 服务端: `frp-server:${{ needs.resolve-version.outputs.version }}`
+            - 客户端: `frp-agent:${{ needs.resolve-version.outputs.version }}`
+          files: |
+            agent/dist/frp-agent-linux-amd64
+            agent/dist/frp-agent-linux-arm64
+            agent/dist/frp-agent-darwin-amd64
+            agent/dist/frp-agent-darwin-arm64
+            agent/dist/frp-agent-windows-amd64.exe
+            agent/dist/SHA256SUMS
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

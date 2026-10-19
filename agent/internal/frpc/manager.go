@@ -2,6 +2,7 @@
 package frpc
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fatedier/frp/client"
+	"github.com/fatedier/frp/client/proxy"
 	"github.com/fatedier/frp/pkg/config"
 	"github.com/fatedier/frp/pkg/config/source"
 	"github.com/fatedier/frp/pkg/config/v1/validation"
@@ -22,10 +24,12 @@ type Manager struct {
 	configPath   string
 	logCollector *logger.Collector
 
-	service *client.Service
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mu      sync.Mutex
+	service    *client.Service
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	updateMu   sync.Mutex
+	proxyNames []string
 
 	isRunning bool
 	OnStatus  func(status string)
@@ -96,6 +100,10 @@ func (m *Manager) Start() error {
 	}
 
 	m.service = svr
+	m.proxyNames = nil
+	for _, cfg := range proxyCfgs {
+		m.proxyNames = append(m.proxyNames, cfg.GetBaseConfig().Name)
+	}
 	m.isRunning = true
 
 	log.Println("[FRP-Core] 内置穿透引擎已启动")
@@ -105,10 +113,13 @@ func (m *Manager) Start() error {
 			log.Printf("[FRP-Core] 运行终止: %v", err)
 		}
 		m.mu.Lock()
-		m.isRunning = false
-		m.service = nil
+		current := m.service == svr
+		if current {
+			m.isRunning = false
+			m.service = nil
+		}
 		m.mu.Unlock()
-		if m.OnStatus != nil {
+		if current && m.OnStatus != nil {
 			m.OnStatus("stopped")
 		}
 	}()
@@ -155,21 +166,61 @@ func (m *Manager) Restart() error {
 
 // UpdateConfig 更新配置并热重载
 func (m *Manager) UpdateConfig(newConfig string) error {
-	log.Println("[FRP-Core] 收到新配置，正在写入磁盘并热重载...")
-
-	// 备份旧配置
-	backupPath := m.configPath + ".bak"
-	if data, err := os.ReadFile(m.configPath); err == nil {
-		_ = os.WriteFile(backupPath, data, 0o600)
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	previous, readErr := os.ReadFile(m.configPath)
+	if readErr == nil && bytes.Equal(previous, []byte(newConfig)) && m.IsRunning() {
+		return nil // normal reconnects must not interrupt working tunnels
 	}
-
-	// 写入新配置（权限 0600，杜绝信息泄露）
-	if err := os.WriteFile(m.configPath, []byte(newConfig), 0o600); err != nil {
-		return fmt.Errorf("写入配置失败: %w", err)
+	next := m.configPath + ".next"
+	if err := os.WriteFile(next, []byte(newConfig), 0o600); err != nil {
+		return fmt.Errorf("写入待验证配置失败: %w", err)
 	}
+	defer os.Remove(next)
+	result, err := config.LoadClientConfigResult(next, false)
+	if err != nil {
+		return fmt.Errorf("新配置解析失败（旧配置未改变）: %w", err)
+	}
+	_, err = validation.ValidateAllClientConfig(result.Common, result.Proxies, result.Visitors, security.NewUnsafeFeatures([]string{}))
+	if err != nil {
+		return fmt.Errorf("新配置校验失败（旧配置未改变）: %w", err)
+	}
+	if readErr == nil {
+		if err := os.WriteFile(m.configPath+".bak", previous, 0o600); err != nil {
+			return fmt.Errorf("备份配置失败: %w", err)
+		}
+	}
+	if err := os.Rename(next, m.configPath); err != nil {
+		return fmt.Errorf("原子替换配置失败: %w", err)
+	}
+	if err := m.Restart(); err != nil {
+		if readErr == nil {
+			if restoreErr := os.WriteFile(m.configPath, previous, 0o600); restoreErr != nil {
+				return fmt.Errorf("配置启动及恢复失败: %v; %w", err, restoreErr)
+			}
+			if restoreErr := m.Restart(); restoreErr != nil {
+				return fmt.Errorf("配置启动及旧核心恢复失败: %v; %w", err, restoreErr)
+			}
+		}
+		return err
+	}
+	return nil
+}
 
-	log.Println("[FRP-Core] 配置文件已更新，重启引擎生效...")
-	return m.Restart()
+// Healthy requires a live authenticated control connection and registered proxies.
+func (m *Manager) Healthy() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.isRunning || m.service == nil || !m.service.IsConnected() {
+		return false
+	}
+	for _, name := range m.proxyNames {
+		status, ok := m.service.StatusExporter().GetProxyStatus(name)
+		if !ok || status == nil || status.Phase != proxy.ProxyPhaseRunning || status.Err != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // IsRunning 检查内置引擎是否在运行

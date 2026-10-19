@@ -11,16 +11,16 @@ import secrets
 import subprocess
 import time
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
-import httpx
 from sqlalchemy.orm import Session
 
-from core import get_current_user, get_db
-from core.container_engine import run_podman
 import crud
 import frp_deploy
 import models
+from core import get_current_user, get_db
+from core.container_engine import run_podman
 
 logger = logging.getLogger(__name__)
 
@@ -398,7 +398,9 @@ async def _serve_agent_install_script(
     key: str | None,
     client_id: str | None,
     db: Session,
-    current_user: models.Admin | None = None
+    current_user: models.Admin | None = None,
+    target_version: str | None = None,
+    upgrade_job_id: str | None = None,
 ) -> PlainTextResponse:
     import crud as crud_module
 
@@ -408,9 +410,13 @@ async def _serve_agent_install_script(
 
     server_key = _get_or_create_install_token(db)
 
-    # 权限校验：已认证管理员，或提供匹配的 install_key，或已指定合法 client_id
+    # client_id is an identifier, never a credential. Upgrade grants are redeemed
+    # by the dedicated endpoint before reaching this private renderer.
     has_valid_key = bool(key and hmac.compare_digest(key, server_key))
     is_admin = current_user is not None
+
+    if not (has_valid_key or is_admin or upgrade_job_id):
+        raise HTTPException(status_code=403, detail="缺少有效安装密钥或受限升级凭据")
 
     if client_id:
         client = crud_module.get_client(db, client_id=client_id)
@@ -448,12 +454,13 @@ async def _serve_agent_install_script(
     client_token = client.auth_token
 
     if platform == "windows":
-        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host)
+        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host, target_version, upgrade_job_id)
     else:
         os_type = "darwin" if platform == "darwin" else "linux"
-        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host)
+        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host, target_version, upgrade_job_id)
 
-    return PlainTextResponse(content=script, media_type="text/plain")
+    return PlainTextResponse(content=script, media_type="text/plain", headers={
+        "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/agent/install/{platform}")
@@ -499,23 +506,52 @@ async def get_agent_install_script(
     )
 
 
-def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None):
+@router.get("/agent/upgrade-script/{platform}")
+async def get_agent_upgrade_script(
+    platform: str, request: Request, client_id: str, grant: str,
+    db: Session = Depends(get_db),
+):
+    from services.agent_upgrades import begin_task, redeem_grant
+
+    if platform not in {"linux", "darwin", "macos", "windows"}:
+        raise HTTPException(status_code=400, detail="不支持的平台")
+    claims = redeem_grant(db, grant, client_id)
+    task = begin_task(db, client_id, claims["target_version"], job_id=claims["jti"])
+    return await _serve_agent_install_script(
+        platform, request, None, client_id, db,
+        target_version=task["target_version"], upgrade_job_id=task["job_id"],
+    )
+
+
+def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None):
     """生成 Windows PowerShell 容器一键部署脚本"""
     if manager_host is None:
         manager_host = server_ip
     manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
-    image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
+    import json
+
+    from services.container_upgrade import image_for, normalize_version
+
+    target_version = normalize_version(target_version or models.APP_VERSION)
+    image = image_for("agent", target_version)
+    initial_config = f'serverAddr = {json.dumps(server_ip)}\nserverPort = {int(frps_port)}\nauth.token = {json.dumps(auth_token)}'
+
+    def ps(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
     return f'''# FRP Manager Agent - 容器一键部署脚本 (Windows PowerShell)
 $ErrorActionPreference = "Stop"
 
-$SERVER_IP = "{server_ip}"
-$FRPS_PORT = "{frps_port}"
-$FRPS_TOKEN = "{auth_token}"
-$CLIENT_TOKEN = "{client_token}"
-$CLIENT_ID = "{client_id}"
-$IMAGE = "{image}"
-$MANAGER_WS_URL = "{manager_ws_url}"
+$SERVER_IP = {ps(server_ip)}
+$FRPS_PORT = {int(frps_port)}
+$FRPS_TOKEN = {ps(auth_token)}
+$CLIENT_TOKEN = {ps(client_token)}
+$CLIENT_ID = {ps(client_id)}
+$IMAGE = {ps(image)}
+$MANAGER_WS_URL = {ps(manager_ws_url)}
 $INSTALL_DIR = "C:\\frp"
+$TARGET_VERSION = "{target_version}"
+$JOB_ID = "{upgrade_job_id or ''}"
 
 Write-Host "======================================================" -ForegroundColor Cyan
 Write-Host "  FRP Manager Agent 容器一键部署 (Windows)" -ForegroundColor Cyan
@@ -538,6 +574,22 @@ if ($CONTAINER_CLI -eq "") {{
 }}
 
 Write-Host "[OK] 检测到容器环境: $CONTAINER_CLI" -ForegroundColor Green
+& $CONTAINER_CLI pull $IMAGE
+if ($LASTEXITCODE -ne 0) {{ throw "镜像拉取失败，原容器与配置未改变" }}
+$IMAGE_ID = (& $CONTAINER_CLI image inspect --format '{{{{.Id}}}}' $IMAGE)
+if ($LASTEXITCODE -ne 0) {{ throw "镜像验证失败" }}
+& $CONTAINER_CLI inspect frp-agent 2>$null | Out-Null
+if ($LASTEXITCODE -eq 0) {{
+    $JobArgs = @()
+    if ($JOB_ID) {{ $JobArgs = @('--job-id', $JOB_ID) }}
+    & $CONTAINER_CLI run --rm --user 0 --volumes-from frp-agent:rw `
+      -v /var/run/docker.sock:/var/run/docker.sock `
+      --entrypoint python3 $IMAGE_ID /usr/local/lib/frp/container_upgrade.py `
+      --container frp-agent --role agent --version $TARGET_VERSION --client-id $CLIENT_ID --enable-socket --wait @JobArgs
+    if ($LASTEXITCODE -ne 0) {{ throw "升级未完成或已回滚，请检查任务与容器日志" }}
+    return
+}}
+if ($JOB_ID) {{ throw "未找到旧客户端容器，拒绝将升级任务作为全新安装执行" }}
 
 # 2. 嗅探宿主机局域网 IP
 $HOST_IP = ""
@@ -557,36 +609,39 @@ if ($HOST_IP) {{
 if (!(Test-Path $INSTALL_DIR)) {{ New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null }}
 if (!(Test-Path "$INSTALL_DIR\\logs")) {{ New-Item -ItemType Directory -Path "$INSTALL_DIR\\logs" -Force | Out-Null }}
 
-$config = @"
-serverAddr = "$SERVER_IP"
-serverPort = $FRPS_PORT
-auth.token = "$FRPS_TOKEN"
-"@
+$config = @'
+{initial_config}
+'@
 
-# 4. 标记归属，供卸载脚本安全识别；使用无 BOM 的 UTF-8 配置
-[System.IO.File]::WriteAllText("$INSTALL_DIR\\frpc.toml", $config, (New-Object System.Text.UTF8Encoding($false)))
+# 保留已有配置；新安装同样不会覆盖历史隧道。
+if (!(Test-Path "$INSTALL_DIR\\frpc.toml")) {{
+    [System.IO.File]::WriteAllText("$INSTALL_DIR\\frpc.toml", $config, (New-Object System.Text.UTF8Encoding($false)))
+}}
 New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Out-Null
-& $CONTAINER_CLI rm -f frp-agent 2>$null | Out-Null
-
-Write-Host "正在从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..." -ForegroundColor Yellow
-& $CONTAINER_CLI pull $IMAGE
-if ($LASTEXITCODE -ne 0) {{ throw "镜像拉取失败" }}
 
 & $CONTAINER_CLI run -d `
   --name frp-agent `
   --network host `
   --restart always `
-  --label io.frp-all-in-one.role=client `
-  --label com.centurylinklabs.watchtower.enable=true `
+  --label io.frp-all-in-one.role=agent `
+  --label com.centurylinklabs.watchtower.enable=false `
+  -v /var/run/docker.sock:/var/run/docker.sock `
   -v "${{INSTALL_DIR}}:/opt/frp" `
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
   -e FRP_HOST_IP="$HOST_IP" `
-  $IMAGE `
+  $IMAGE_ID `
   -server "$MANAGER_WS_URL" `
   -id "$CLIENT_ID" `
   -config /opt/frp/frpc.toml `
   -log /opt/frp/logs
 if ($LASTEXITCODE -ne 0) {{ throw "客户端容器启动失败" }}
+$Ready = $false
+for ($i = 0; $i -lt 30; $i++) {{
+    & $CONTAINER_CLI exec frp-agent frp-agent -healthcheck -expect-version $TARGET_VERSION.TrimStart('v') 2>$null
+    if ($LASTEXITCODE -eq 0) {{ $Ready = $true; break }}
+    Start-Sleep -Seconds 3
+}}
+if (!$Ready) {{ throw "客户端尚未通过管理连接/隧道就绪检查，请查看日志" }}
 
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host "  部署成功！FRP-Agent 容器已在后台运行" -ForegroundColor Green
@@ -603,12 +658,19 @@ Write-Host "& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubuserc
 '''
 
 
-def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None):
+def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None):
     """生成 Linux/macOS 容器一键部署脚本（自动检测/就绪容器环境，统一拉取 TCR 客户端镜像）"""
     if manager_host is None:
         manager_host = server_ip
     manager_ws_url = f"{ws_scheme}://{manager_host}/ws/agent/{client_id}"
-    image = "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest"
+    import json
+    import shlex
+
+    from services.container_upgrade import image_for, normalize_version
+
+    target_version = normalize_version(target_version or models.APP_VERSION)
+    image = image_for("agent", target_version)
+    initial_config = f'serverAddr = {json.dumps(server_ip)}\nserverPort = {int(frps_port)}\nauth.token = {json.dumps(auth_token)}'
     install_dir = "$HOME/.frp-all-in-one" if os_type == "darwin" else "/opt/frp"
     uninstall_runner = "bash" if os_type == "darwin" else "sudo bash"
     return f'''#!/bin/bash
@@ -617,14 +679,16 @@ def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_to
 
 set -e
 
-SERVER_IP="{server_ip}"
-FRPS_PORT="{frps_port}"
-FRPS_TOKEN="{auth_token}"
-CLIENT_TOKEN="{client_token}"
-CLIENT_ID="{client_id}"
-IMAGE="{image}"
-MANAGER_WS_URL="{manager_ws_url}"
+SERVER_IP={shlex.quote(server_ip)}
+FRPS_PORT={int(frps_port)}
+FRPS_TOKEN={shlex.quote(auth_token)}
+CLIENT_TOKEN={shlex.quote(client_token)}
+CLIENT_ID={shlex.quote(client_id)}
+IMAGE={shlex.quote(image)}
+MANAGER_WS_URL={shlex.quote(manager_ws_url)}
 INSTALL_DIR="{install_dir}"
+TARGET_VERSION="{target_version}"
+JOB_ID="{upgrade_job_id or ''}"
 
 RED='\\033[0;31m'
 GREEN='\\033[0;32m'
@@ -697,6 +761,34 @@ if [ -z "$CONTAINER_CLI" ]; then
 fi
 
 log_ok "使用容器引擎: $CONTAINER_CLI"
+# 镜像先拉取，任何失败都不会修改旧容器或配置。
+$CONTAINER_CLI pull "$IMAGE"
+IMAGE_ID=$($CONTAINER_CLI image inspect --format '{{{{.Id}}}}' "$IMAGE")
+SOCKET="/var/run/docker.sock"
+if [ "$CONTAINER_CLI" = "podman" ]; then
+    SOCKET="${{XDG_RUNTIME_DIR:-/run}}/podman/podman.sock"
+    [ -S "$SOCKET" ] || SOCKET="/run/podman/podman.sock"
+fi
+if $CONTAINER_CLI inspect frp-agent >/dev/null 2>&1; then
+    if [ ! -S "$SOCKET" ]; then
+        log_error "引擎 Socket 不可用，请先启动 docker 或 podman.socket；旧容器未改变"
+        exit 1
+    fi
+    JOB_ARGS=()
+    if [ -n "$JOB_ID" ]; then JOB_ARGS=(--job-id "$JOB_ID"); fi
+    # 显式挂载引擎 Socket 将授予客户端宿主机管理权限，供后续远程升级。
+    $CONTAINER_CLI run --rm --user 0 --volumes-from frp-agent:rw \\
+      -v "$SOCKET:/var/run/docker.sock" \\
+      -e "FRP_UPGRADE_HOST_SOCKET=$SOCKET" \\
+      --entrypoint python3 "$IMAGE_ID" /usr/local/lib/frp/container_upgrade.py \\
+      --container frp-agent --role agent --version "$TARGET_VERSION" --client-id "$CLIENT_ID" \\
+      --enable-socket --wait "${{JOB_ARGS[@]}}"
+    exit $?
+fi
+if [ -n "$JOB_ID" ]; then
+    log_error "未找到原客户端容器；升级命令不会重新安装或覆盖其他服务"
+    exit 1
+fi
 
 # 2. 嗅探宿主机实际局域网 IP（供 Agent 回传及配置隧道使用）
 log_info "[2/5] 探测宿主机局域网 IP..."
@@ -728,43 +820,48 @@ log_info "[3/5] 创建本地配置目录: $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/logs"
 
+if [ ! -f "$INSTALL_DIR/frpc.toml" ]; then
 cat > "$INSTALL_DIR/frpc.toml" << 'FRPC_CONFIG'
-serverAddr = "{server_ip}"
-serverPort = {frps_port}
-auth.token = "{auth_token}"
+{initial_config}
 FRPC_CONFIG
+fi
 chmod 600 "$INSTALL_DIR/frpc.toml"
 touch "$INSTALL_DIR/.frp-all-in-one-client"
 log_ok "本地配置文件已创建 (0600 权限)"
 
-# 4. 清理已存在的旧 Agent 容器
-log_info "[4/5] 检查并清理旧容器..."
-$CONTAINER_CLI rm -f frp-agent 2>/dev/null || true
-
-# 5. 从腾讯云公开镜像仓库秒级拉取并启动
-log_info "[5/5] 从腾讯云公开镜像仓库拉取并启动 frp-agent 容器..."
-$CONTAINER_CLI pull "$IMAGE"
-
-SOCK_MOUNT=""
-if [ -S "/var/run/docker.sock" ]; then
-    SOCK_MOUNT="-v /var/run/docker.sock:/var/run/docker.sock"
+log_info "[4/5] 新安装，正在使用已验证拉取的镜像启动..."
+SOCK_ARGS=()
+if [ -S "$SOCKET" ]; then
+    SOCK_ARGS=(-v "$SOCKET:/var/run/docker.sock")
 fi
 
 $CONTAINER_CLI run -d \\
   --name frp-agent \\
   --network host \\
   --restart always \\
-  --label io.frp-all-in-one.role=client \\
-  --label com.centurylinklabs.watchtower.enable=true \\
-  $SOCK_MOUNT \\
+  --label io.frp-all-in-one.role=agent \\
+  --label com.centurylinklabs.watchtower.enable=false \\
+  "${{SOCK_ARGS[@]}}" \\
   -v "$INSTALL_DIR:/opt/frp" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
   -e FRP_HOST_IP="$HOST_IP" \\
-  "$IMAGE" \\
+  "$IMAGE_ID" \\
   -server "$MANAGER_WS_URL" \\
   -id "$CLIENT_ID" \\
   -config /opt/frp/frpc.toml \\
   -log /opt/frp/logs
+
+READY=0
+for _ in {{1..30}}; do
+    if $CONTAINER_CLI exec frp-agent frp-agent -healthcheck -expect-version "${{TARGET_VERSION#v}}" >/dev/null 2>&1; then
+        READY=1; break
+    fi
+    sleep 3
+done
+if [ "$READY" -ne 1 ]; then
+    log_error "客户端尚未通过管理连接及隧道就绪检查，请查看容器日志"
+    exit 1
+fi
 
 echo ""
 echo -e "${{GREEN}}======================================================${{NC}}"

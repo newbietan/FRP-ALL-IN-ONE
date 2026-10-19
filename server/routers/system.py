@@ -7,6 +7,8 @@ import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import literal, select
 from sqlalchemy.orm import Session
 
 from core import get_current_user, get_db
@@ -125,8 +127,27 @@ async def check_system_update(
     return await check_github_update(force=force)
 
 
+class UpgradeRequest(BaseModel):
+    target_version: str | None = None
+
+
+@router.get("/upgrade/health")
+def get_upgrade_health():
+    """Minimal public readiness: exact build, database and embedded FRPS."""
+    from core.container_engine import FRPSProcessManager
+    from database import engine
+    try:
+        with engine.connect() as connection:
+            connection.scalar(select(literal(1)))
+        ready = FRPSProcessManager.is_running()
+    except Exception:
+        ready = False
+    return {"ready": ready, "app_version": f"v{models.APP_VERSION}"}
+
+
 @router.post("/upgrade")
 async def trigger_system_upgrade(
+    payload: UpgradeRequest | None = None,
     current_user: models.Admin = Depends(get_current_user)
 ):
     """
@@ -134,7 +155,7 @@ async def trigger_system_upgrade(
     仅限已认证管理员操作
     """
     from services import self_updater
-    return await self_updater.trigger_self_upgrade()
+    return await self_updater.trigger_self_upgrade(payload.target_version if payload else None)
 
 
 @router.get("/upgrade/status")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from jose import JWTError, jwt
 
@@ -38,7 +39,7 @@ SECRET_KEY: str | None = None
 def init_secret_key():
     """
     初始化 JWT Secret Key
-    优先级：1. 环境变量 SECRET_KEY  2. 内存中自动生成（重启失效）
+    优先级：环境变量 SECRET_KEY，其次持久化数据卷中的私有密钥。
     """
     global SECRET_KEY
 
@@ -48,9 +49,19 @@ def init_secret_key():
         print("[Security] JWT Secret Key 从环境变量加载")
         return
 
-    SECRET_KEY = secrets.token_urlsafe(64)
-    print("[WARN] 未配置 SECRET_KEY 环境变量，已生成临时密钥（重启后所有登录会话将失效）")
-    print("[Security] 生产环境建议在 compose.yml 中设置: SECRET_KEY=<your-random-key>")
+    key_path = Path(os.environ.get("FRP_SECRET_FILE", "./data/.jwt_secret"))
+    key_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        SECRET_KEY = key_path.read_text(encoding="utf-8").strip()
+        if not SECRET_KEY:
+            raise RuntimeError("持久化 JWT 密钥为空，请检查数据卷，拒绝生成新密钥使会话失效") from None
+    else:
+        SECRET_KEY = secrets.token_urlsafe(64)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(SECRET_KEY)
+    print("[Security] JWT Secret Key 从私有持久化文件加载")
 
 
 def get_secret_key() -> str:

@@ -189,92 +189,105 @@ async def get_websocket_stats(
     return ws_manager.get_stats()
 
 
-@router.post("/{client_id}/upgrade")
-async def trigger_agent_upgrade(
-    client_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
+def _upgrade_command(client, request: Request, db: Session) -> dict:
+    import re
+    from urllib.parse import urlencode
+
+    from routers.clients import _build_client_agent_info
+    from services.agent_upgrades import issue_grant
+
+    info = _build_client_agent_info(db, client.id)
+    os_type = (info.get("os") or "linux").lower()
+    platform = "windows" if os_type == "windows" else ("darwin" if os_type in ("darwin", "macos") else "linux")
+    base = (request.headers.get("origin") or str(request.base_url)).rstrip("/")
+    if not re.fullmatch(r"https?://[A-Za-z0-9.\-:\[\]]+", base):
+        raise HTTPException(status_code=400, detail="面板访问地址无效")
+    target = f"v{models.APP_VERSION}"
+    grant = issue_grant(db, client.id, target)
+    query = urlencode({"client_id": client.id, "grant": grant})
+    url = f"{base}/api/frp/agent/upgrade-script/{platform}?{query}"
+    if platform == "windows":
+        command = f"& ([scriptblock]::Create((Invoke-RestMethod '{url}')))"
+    else:
+        runner = "bash" if platform == "darwin" else "sudo bash"
+        command = f"curl -fsSL '{url}' -o /tmp/frp-client-upgrade.sh && {runner} /tmp/frp-client-upgrade.sh"
+    return {"upgrade_command": command, "target_version": target, "expires_in": 600}
+
+
+@router.post("/{client_id}/upgrade-command")
+async def get_agent_upgrade_command(
+    client_id: str, request: Request, db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
-    """向指定 Agent 下发远程升级信号，并返回对应的升级安装命令"""
+    """管理员按需生成 10 分钟、单客户端、单次有效的命令。"""
     client = crud.get_client(db, client_id=client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    return _upgrade_command(client, request, db)
 
-    is_online = ws_manager.is_agent_online(client_id)
-    agent_info = ws_manager.agent_system_info.get(client_id, {})
-    os_type = (agent_info.get("os") or "linux").lower()
-    platform = "windows" if os_type == "windows" else ("darwin" if os_type in ("darwin", "macos") else "linux")
 
-    server_ip = crud.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
-    tls_enabled = crud.get_config(db, models.ConfigKeys.TLS_ENABLED) == "true"
-    scheme = "https" if tls_enabled else "http"
-    server_domain = (crud.get_config(db, models.ConfigKeys.SERVER_DOMAIN) or "").strip()
-    host = server_domain if (tls_enabled and server_domain) else server_ip
+@router.post("/{client_id}/upgrade")
+async def trigger_agent_upgrade(
+    client_id: str, request: Request, db: Session = Depends(get_db),
+    current_user: models.Admin = Depends(get_current_user)
+):
+    from services.agent_upgrades import begin_task, update_task
+    from services.container_upgrade import image_for
 
-    if platform == "windows":
-        upgrade_cmd = f"& ([scriptblock]::Create((Invoke-RestMethod '{scheme}://{host}/api/frp/agent/install-script/windows?client_id={client_id}')))"
-    elif platform == "darwin":
-        upgrade_cmd = f"curl -fsSL '{scheme}://{host}/api/frp/agent/install-script/darwin?client_id={client_id}' | bash"
-    else:
-        upgrade_cmd = f"curl -fsSL '{scheme}://{host}/api/frp/agent/install-script/linux?client_id={client_id}' | sudo bash"
-
-    ws_sent = False
-    if is_online:
-        ws_sent = await ws_manager.send_to_agent(client_id, {
-            "type": "upgrade",
-            "data": {
-                "target_version": f"v{models.APP_VERSION}",
-                "image": "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest",
-                "upgrade_command": upgrade_cmd,
-            }
-        })
-
-    return {
-        "success": True,
-        "is_online": is_online,
-        "signal_sent": ws_sent,
-        "client_id": client_id,
-        "target_version": f"v{models.APP_VERSION}",
-        "upgrade_command": upgrade_cmd,
-        "message": "已向客户端下发远程升级信号" if ws_sent else "客户端当前离线，已生成升级执行命令"
-    }
+    client = crud.get_client(db, client_id=client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    online = ws_manager.is_agent_online(client_id)
+    info = ws_manager.agent_system_info.get(client_id, {})
+    target = f"v{models.APP_VERSION}"
+    capable = info.get("upgrade_protocol") == 1 and info.get("can_self_upgrade") is True
+    sent = False
+    task = None
+    if online and capable:
+        task = begin_task(db, client_id, target)
+        sent = await ws_manager.send_to_agent(client_id, {
+            "type": "upgrade", "data": {"job_id": task["job_id"], "target_version": target,
+                                         "image": image_for("agent", target)}})
+        if not sent:
+            task = update_task(db, client_id, {**task, "status": "failed", "message": "发送失败，客户端连接已断开"})
+    message = "指令已发送，等待客户端真实确认" if sent else "客户端离线、旧版不支持升级执行器或未挂载 Socket，请使用安全手动命令"
+    return {"success": True, "is_online": online, "signal_sent": sent, "client_id": client_id,
+            "target_version": target, "job_id": task["job_id"] if task else None,
+            "message": message, **(_upgrade_command(client, request, db) if not sent else {})}
 
 
 @router.get("/{client_id}/upgrade-status")
 async def get_agent_upgrade_status_endpoint(
-    client_id: str,
+    client_id: str, db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
-    """获取指定 Agent 最近的升级反馈状态"""
-    status = ws_manager.get_agent_upgrade_status(client_id)
-    return {"client_id": client_id, "status": status}
+    from services.agent_upgrades import get_task
+    return {"client_id": client_id, "status": get_task(db, client_id)}
 
 
 @router.post("/batch-upgrade")
 async def trigger_batch_agent_upgrade(
-    request: Request,
-    db: Session = Depends(get_db),
+    request: Request, db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
-    """向所有在线且落后版本的 Agent 批量下发升级信号"""
-    clients = crud.get_clients(db)
+    from routers.clients import _build_client_agent_info
+
     results = []
-    current_server_ver = f"v{models.APP_VERSION}"
-    for c in clients:
-        info = ws_manager.agent_system_info.get(c.id, {})
-        agent_ver = info.get("agent_version")
-        if agent_ver and models.is_newer_version(current_server_ver, agent_ver) and ws_manager.is_agent_online(c.id):
-            sent = await ws_manager.send_to_agent(c.id, {
-                "type": "upgrade",
-                "data": {
-                    "target_version": current_server_ver,
-                    "image": "sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent:latest",
-                }
-            })
-            results.append({"client_id": c.id, "name": c.name, "signal_sent": sent})
-    return {
-        "success": True,
-        "upgraded_count": len(results),
-        "details": results
-    }
+    skipped = []
+    target = f"v{models.APP_VERSION}"
+    for client in db.query(models.Client).all():
+        info = _build_client_agent_info(db, client.id)
+        version = info.get("agent_version") or info.get("version")
+        if not version or not models.is_newer_version(target, version):
+            continue
+        cached = ws_manager.agent_system_info.get(client.id, {})
+        if not ws_manager.is_agent_online(client.id) or not cached.get("can_self_upgrade") or cached.get("upgrade_protocol") != 1:
+            skipped.append({"client_id": client.id, "reason": "离线或需要先手动迁移升级执行器/Socket"})
+            continue
+        try:
+            result = await trigger_agent_upgrade(client.id, request, db, current_user)
+            results.append({"client_id": client.id, "name": client.name, "signal_sent": result["signal_sent"]})
+        except HTTPException as exc:
+            skipped.append({"client_id": client.id, "reason": str(exc.detail)})
+    sent_count = sum(bool(item["signal_sent"]) for item in results)
+    return {"success": True, "upgraded_count": sent_count, "sent_count": sent_count, "details": results, "skipped": skipped}

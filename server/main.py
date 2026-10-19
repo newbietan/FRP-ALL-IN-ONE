@@ -460,6 +460,9 @@ async def _handle_agent_message(client_id: str, msg: dict):
                 "os": os_name,
                 "arch": arch,
                 "version": version,
+                "agent_version": version,
+                "upgrade_protocol": 1 if raw.get("upgrade_protocol") == 1 else 0,
+                "can_self_upgrade": raw.get("can_self_upgrade") is True,
                 "platform": platform,
             }
             if ip:
@@ -469,6 +472,10 @@ async def _handle_agent_message(client_id: str, msg: dict):
             ws_manager.update_agent_system_info(client_id, cached_update)
         finally:
             db.close()
+        # Every registration/reconnection reconciles the authoritative tunnel config.
+        # Agent skips byte-identical configurations, avoiding needless restarts.
+        from routers.clients import _push_config_for_client
+        await _push_config_for_client(client_id)
 
     elif msg_type == "system_info":
         if not isinstance(data, dict):
@@ -551,13 +558,19 @@ async def _handle_agent_message(client_id: str, msg: dict):
         await ws_manager.broadcast_log(client_id, str(data) if data is not None else "")
 
     elif msg_type == "upgrade_status":
+        from services.agent_upgrades import update_task
         raw = data if isinstance(data, dict) else {}
-        ws_manager.update_agent_upgrade_status(client_id, raw)
-        await ws_manager.broadcast_dashboard({
-            "type": "agent_upgrade_status",
-            "client_id": client_id,
-            "data": ws_manager.get_agent_upgrade_status(client_id),
-        })
+        info = ws_manager.agent_system_info.get(client_id, {})
+        db = SessionLocal()
+        try:
+            task = update_task(db, client_id, raw, agent_version=info.get("agent_version") or "")
+        finally:
+            db.close()
+        if task:
+            ws_manager.update_agent_upgrade_status(client_id, task)
+            await ws_manager.broadcast_dashboard({
+                "type": "agent_upgrade_status", "client_id": client_id, "data": task,
+            })
 
     elif msg_type == "frpc_status":
         db = SessionLocal()

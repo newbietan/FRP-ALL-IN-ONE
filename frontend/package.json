@@ -1,7 +1,7 @@
 {
   "name": "frp-all-in-one-frontend",
   "private": true,
-  "version": "3.2.5",
+  "version": "3.2.9",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",

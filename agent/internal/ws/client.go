@@ -3,6 +3,7 @@ package ws
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/frp-manager/agent/internal/monitor"
+	"github.com/frp-manager/agent/internal/upgrade"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -128,14 +130,16 @@ func (c *Client) connect() error {
 
 	// 发送注册消息（包含系统信息及嗅探到的宿主机IP）
 	c.Send("register", map[string]interface{}{
-		"client_id": c.clientID,
-		"version":   c.version,
-		"hostname":  hostname,
-		"os":        runtime.GOOS,
-		"arch":      runtime.GOARCH,
-		"platform":  hostInfo["platform"],
-		"ip":        primaryIP,
-		"ips":       candidateIPs,
+		"client_id":        c.clientID,
+		"version":          c.version,
+		"upgrade_protocol": 1,
+		"can_self_upgrade": upgrade.Capable(),
+		"hostname":         hostname,
+		"os":               runtime.GOOS,
+		"arch":             runtime.GOARCH,
+		"platform":         hostInfo["platform"],
+		"ip":               primaryIP,
+		"ips":              candidateIPs,
 	})
 
 	if c.OnConnect != nil {
@@ -158,6 +162,14 @@ func (c *Client) readLoop() {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("[WebSocket] 读取消息失败: %v", err)
+			c.writeMu.Lock()
+			c.mu.Lock()
+			if c.conn == conn {
+				c.conn = nil
+			}
+			c.mu.Unlock()
+			conn.Close()
+			c.writeMu.Unlock()
 			return
 		}
 
@@ -194,7 +206,7 @@ func (c *Client) Send(msgType string, data interface{}) error {
 	conn := c.conn
 	c.mu.RUnlock()
 	if conn == nil {
-		return nil
+		return fmt.Errorf("WebSocket is disconnected")
 	}
 
 	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
