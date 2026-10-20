@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	version   = "3.2.12"
+	version   = "3.2.13"
 	buildTime = "unknown"
 )
 
@@ -149,10 +149,10 @@ func main() {
 		case "config_update":
 			log.Println("收到配置更新，正在重载 FRPC...")
 			if configData, ok := msg.Data.(string); ok {
-				if err := frpcManager.UpdateConfig(configData); err != nil {
-					log.Printf("配置更新失败: %v", err)
+				if err := frpcManager.ApplyConfig(configData); err != nil {
+					log.Printf("配置应用未完成: %v", err)
 				} else {
-					log.Println("配置更新成功")
+					log.Println("配置应用成功：FRPS 已连接，启用隧道已注册")
 				}
 			}
 		case "restart":

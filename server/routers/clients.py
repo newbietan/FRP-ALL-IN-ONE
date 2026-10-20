@@ -77,12 +77,12 @@ def _render_frpc_toml(db: Session, client: models.Client) -> str | None:
             continue
 
         proxy_type = t.type.value if hasattr(t.type, "value") else str(t.type)
-        # 清洗名称，防止 TOML 语法错误 (例如包含双引号)
-        safe_client_name = (client.name or "unknown").replace('"', '').strip()
-        safe_tunnel_name = (t.name or f"tun_{t.id}").replace('"', '').strip()
-        proxy_name = f"{safe_client_name}.{safe_tunnel_name}"
+        # FRPS proxy names are global, but host/tunnel display names may repeat.
+        # Use full persistent IDs: renames and disable/re-enable retain identity,
+        # and two Ubuntu devices can both expose a tunnel displayed as "SSH".
+        proxy_name = f"client-{client.id}.tunnel-{t.id}"
         lines.append("[[proxies]]")
-        lines.append(f'name = "{proxy_name}"')
+        lines.append(f'name = {json.dumps(proxy_name)}')
         lines.append(f'type = "{proxy_type}"')
         # 防御性清洗：防止 TOML 注入
         safe_local_ip = (t.local_ip or "127.0.0.1").replace('"', '').replace('\n', '').replace('\r', '').strip()
