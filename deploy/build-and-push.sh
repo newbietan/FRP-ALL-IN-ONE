@@ -10,15 +10,22 @@ PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 
 REGISTRY="sgccr.ccs.tencentyun.com/frp-all-in-one"
 TAG="${1:-latest}"
+VERSION="${FRP_BUILD_VERSION:-$TAG}"
+if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "[ERROR] 请指定正式版本: bash build-and-push.sh vX.Y.Z；构建 latest 时需设置 FRP_BUILD_VERSION=vX.Y.Z" >&2
+    exit 2
+fi
+VERSION="${VERSION#v}"
+if [ "$TAG" != latest ] && [ "${TAG#v}" != "$VERSION" ]; then
+    echo "[ERROR] 镜像标签与构建版本必须一致" >&2
+    exit 2
+fi
+if [ "$TAG" != latest ]; then TAG="v$VERSION"; fi
 
 CONTAINER_TOOL="docker"
 if ! command -v docker >/dev/null 2>&1; then
-    if command -v podman >/dev/null 2>&1; then
-        CONTAINER_TOOL="podman"
-    else
-        echo "[ERROR] 未检测到 docker 或 podman"
-        exit 1
-    fi
+    echo "[ERROR] 未检测到 Docker"
+    exit 1
 fi
 
 echo "=================================================================="
@@ -35,6 +42,8 @@ echo ""
 echo "[1/2] 构建全合一服务端镜像 (frp-server)..."
 $CONTAINER_TOOL build \
     -f server/Dockerfile \
+    --build-arg "APP_VERSION=$VERSION" \
+    --build-arg "VITE_APP_VERSION=v$VERSION" \
     -t "$REGISTRY/frp-server:$TAG" \
     "$PROJECT_ROOT"
 
@@ -43,6 +52,7 @@ echo ""
 echo "[2/2] 构建客户端 Agent 容器镜像 (frp-agent)..."
 $CONTAINER_TOOL build \
     -f agent/Dockerfile \
+    --build-arg "AGENT_VERSION=$VERSION" \
     -t "$REGISTRY/frp-agent:$TAG" \
     "$PROJECT_ROOT"
 

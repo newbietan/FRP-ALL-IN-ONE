@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from typing import Any
 
-from core.container_engine import run_podman
+from core.container_engine import run_docker
 
 logger = logging.getLogger(__name__)
 
@@ -391,7 +391,7 @@ server {{
         return config
 
     def apply_nginx_config(self, config_content: str, config_name: str = "default.conf") -> dict[str, Any]:
-        """应用 Nginx 配置：优先直接写入共享卷（避免依赖 podman cp），回退使用 podman cp"""
+        """应用 Nginx 配置：优先写入共享卷，回退使用 docker cp。"""
         target_dir = Path("/etc/nginx/conf.d")
         target_file = target_dir / config_name
         try:
@@ -399,18 +399,18 @@ server {{
                 target_file.write_text(config_content)
                 return {"success": True, "message": "Nginx 配置已写入共享数据卷"}
         except Exception as e:
-            print(f"[TLSManager] 写入共享卷失败，回退使用 podman cp: {e}")
+            print(f"[TLSManager] 写入共享卷失败，回退使用 docker cp: {e}")
 
         # 回退至通过本地 certs 目录复制
         local_path = Path("/app/certs") / config_name
         try:
             local_path.write_text(config_content)
-            cp_result = run_podman(
+            cp_result = run_docker(
                 ["cp", str(local_path), f"frp-manager-web:/etc/nginx/conf.d/{config_name}"],
                 timeout=30,
             )
             if cp_result.returncode == 0:
-                return {"success": True, "message": "Nginx 配置已通过 podman cp 同步"}
+                return {"success": True, "message": "Nginx 配置已通过 docker cp 同步"}
             return {"success": False, "message": f"复制 Nginx 配置失败: {cp_result.stderr}"}
         except Exception as e:
             return {"success": False, "message": f"部署 Nginx 配置失败: {e}"}
@@ -447,7 +447,7 @@ server {{
         # 2. 容器模式回退
         try:
             # 先测试配置
-            test_result = run_podman(
+            test_result = run_docker(
                 ["exec", "frp-manager-web", "nginx", "-t"],
                 timeout=30,
             )
@@ -459,7 +459,7 @@ server {{
                 }
 
             # 重载配置
-            reload_result = run_podman(
+            reload_result = run_docker(
                 ["exec", "frp-manager-web", "nginx", "-s", "reload"],
                 timeout=30,
             )

@@ -213,4 +213,4 @@ echo "当前内存状态:"
 free -h
 
 echo ""
-echo "提示: 现在可以安全地运行 podman compose -f compose.yml up -d --build"
+echo "提示: 现在可以安全地运行 docker compose -f compose.yml up -d"

@@ -6,7 +6,6 @@
     <a href="https://github.com/newbietan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/newbietan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/newbietan/FRP-ALL-IN-ONE?style=flat"></a>
     <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white">
-    <img alt="Podman" src="https://img.shields.io/badge/Podman-892CA0?style=flat&logo=podman&logoColor=white">
     <img alt="FRP Core" src="https://img.shields.io/badge/FRP_Core-v0.71.1-00ADD8?style=flat">
     <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white">
     <img alt="React" src="https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black">
@@ -153,6 +152,10 @@ Open `http://<YOUR_SERVER_IP>:8080` in your browser.
 > **Client Device Onboarding**: Once the server is running, log into the Web Console, go to **Devices** → click **Add Device**, and copy the auto-generated one-click container command or setup script to your edge device.
 
 ---
+
+## Upgrades and rollback
+
+Docker only. Upgrades pin the target version, preserve configuration, verify readiness, and roll back on failure. Connections briefly disconnect during replacement; this is not zero-downtime. Legacy installations require an initial host-side migration. See the [upgrade guide and failure analysis](docs/upgrade.md) (Chinese).
 
 <a id="ports"></a>
 

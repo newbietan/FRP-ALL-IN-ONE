@@ -20,7 +20,7 @@ import crud
 import frp_deploy
 import models
 from core import get_current_user, get_db
-from core.container_engine import run_podman
+from core.container_engine import run_docker
 
 logger = logging.getLogger(__name__)
 
@@ -245,13 +245,13 @@ async def restart_frps(
         return {"success": True, "message": "FRPS 已通过 API 成功热重载（零断连）"}
     try:
         import asyncio
-        result = await asyncio.to_thread(run_podman, ["restart", "frps"], 30)
+        result = await asyncio.to_thread(run_docker, ["restart", "frps"], 30)
         if result.returncode == 0:
             return {"success": True, "message": "FRPS 重启成功"}
         else:
             return {"success": False, "message": f"重启失败: {result.stderr.strip()}"}
     except FileNotFoundError:
-        return {"success": False, "message": "未找到 podman 命令"}
+        return {"success": False, "message": "未找到 docker 命令"}
     except subprocess.TimeoutExpired:
         return {"success": False, "message": "重启超时"}
     except Exception as e:
@@ -511,12 +511,18 @@ async def get_agent_upgrade_script(
     platform: str, request: Request, client_id: str, grant: str,
     db: Session = Depends(get_db),
 ):
-    from services.agent_upgrades import begin_task, redeem_grant
+    from services.agent_upgrades import ACTIVE, begin_task, get_task, redeem_grant
 
     if platform not in {"linux", "darwin", "macos", "windows"}:
         raise HTTPException(status_code=400, detail="不支持的平台")
     claims = redeem_grant(db, grant, client_id)
-    task = begin_task(db, client_id, claims["target_version"], job_id=claims["jti"])
+    # Fetching a script cannot prove it was executed. Reissue a capability for
+    # the SAME active transaction so an interrupted download/pull is retryable.
+    # The client's persistent lock still prevents concurrent container switches.
+    task = get_task(db, client_id)
+    if not (task and task["status"] in ACTIVE | {"unknown"}
+            and task["target_version"] == claims["target_version"]):
+        task = begin_task(db, client_id, claims["target_version"], job_id=claims["jti"])
     return await _serve_agent_install_script(
         platform, request, None, client_id, db,
         target_version=task["target_version"], upgrade_job_id=task["job_id"],
@@ -562,12 +568,10 @@ Write-Host "======================================================" -ForegroundC
 $CONTAINER_CLI = ""
 if (Get-Command docker -ErrorAction SilentlyContinue) {{
     $CONTAINER_CLI = "docker"
-}} elseif (Get-Command podman -ErrorAction SilentlyContinue) {{
-    $CONTAINER_CLI = "podman"
 }}
 
 if ($CONTAINER_CLI -eq "") {{
-    Write-Host "[WARN] 未检测到 Docker 或 Podman 环境。" -ForegroundColor Yellow
+    Write-Host "[WARN] 未检测到 Docker 环境。" -ForegroundColor Yellow
     Write-Host "请先安装 Docker Desktop: https://www.docker.com/products/docker-desktop/" -ForegroundColor Cyan
     Write-Host "安装完成并启动后，再次执行此脚本即可自动运行客户端。" -ForegroundColor Green
     Exit 1
@@ -578,8 +582,15 @@ Write-Host "[OK] 检测到容器环境: $CONTAINER_CLI" -ForegroundColor Green
 if ($LASTEXITCODE -ne 0) {{ throw "镜像拉取失败，原容器与配置未改变" }}
 $IMAGE_ID = (& $CONTAINER_CLI image inspect --format '{{{{.Id}}}}' $IMAGE)
 if ($LASTEXITCODE -ne 0) {{ throw "镜像验证失败" }}
-& $CONTAINER_CLI inspect frp-agent 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) {{
+# Windows PowerShell 5.1 treats native stderr as terminating under Stop,
+# even for expected probe failures. Preserve the exit code explicitly.
+$PreviousPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {{
+    & $CONTAINER_CLI inspect frp-agent 2>$null | Out-Null
+    $Exists = $LASTEXITCODE -eq 0
+}} finally {{ $ErrorActionPreference = $PreviousPreference }}
+if ($Exists) {{
     $JobArgs = @()
     if ($JOB_ID) {{ $JobArgs = @('--job-id', $JOB_ID) }}
     & $CONTAINER_CLI run --rm --user 0 --volumes-from frp-agent:rw `
@@ -637,8 +648,13 @@ New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Ou
 if ($LASTEXITCODE -ne 0) {{ throw "客户端容器启动失败" }}
 $Ready = $false
 for ($i = 0; $i -lt 30; $i++) {{
-    & $CONTAINER_CLI exec frp-agent frp-agent -healthcheck -expect-version $TARGET_VERSION.TrimStart('v') 2>$null
-    if ($LASTEXITCODE -eq 0) {{ $Ready = $true; break }}
+    $PreviousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {{
+        & $CONTAINER_CLI exec frp-agent frp-agent -healthcheck -expect-version $TARGET_VERSION.TrimStart('v') 2>$null
+        $Healthy = $LASTEXITCODE -eq 0
+    }} finally {{ $ErrorActionPreference = $PreviousPreference }}
+    if ($Healthy) {{ $Ready = $true; break }}
     Start-Sleep -Seconds 3
 }}
 if (!$Ready) {{ throw "客户端尚未通过管理连接/隧道就绪检查，请查看日志" }}
@@ -675,7 +691,7 @@ def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_to
     uninstall_runner = "bash" if os_type == "darwin" else "sudo bash"
     return f'''#!/bin/bash
 # FRP Manager Agent - 容器一键部署脚本 ({os_type})
-# 架构: 自动检测/就绪 Docker 或 Podman 环境，从腾讯云公开镜像仓库拉取并启动
+# 架构: 自动检测/就绪 Docker 环境，从腾讯云公开镜像仓库拉取并启动
 
 set -e
 
@@ -714,10 +730,8 @@ CONTAINER_CLI=""
 
 if command -v docker >/dev/null 2>&1; then
     CONTAINER_CLI="docker"
-elif command -v podman >/dev/null 2>&1; then
-    CONTAINER_CLI="podman"
 else
-    log_warn "未检测到 Docker 或 Podman 环境，正在尝试就绪..."
+    log_warn "未检测到 Docker 环境，正在尝试就绪..."
     if [ "{os_type}" = "linux" ]; then
         if [ "$EUID" -ne 0 ]; then
             log_error "当前非 root 用户，无法自动安装容器环境。请先安装 Docker: curl -fsSL https://get.docker.com | bash"
@@ -727,13 +741,13 @@ else
             . /etc/os-release
             case "$ID" in
                 ubuntu|debian)
-                    apt-get update && apt-get install -y docker.io || apt-get install -y podman
+                    apt-get update && apt-get install -y docker.io
                     ;;
                 centos|rhel|fedora|rocky|almalinux)
-                    yum install -y docker || yum install -y podman
+                    yum install -y docker
                     ;;
                 alpine)
-                    apk update && apk add --no-cache podman
+                    apk update && apk add --no-cache docker
                     ;;
                 *)
                     curl -fsSL https://get.docker.com | bash
@@ -746,8 +760,6 @@ else
         if command -v docker >/dev/null 2>&1; then
             CONTAINER_CLI="docker"
             systemctl enable --now docker 2>/dev/null || true
-        elif command -v podman >/dev/null 2>&1; then
-            CONTAINER_CLI="podman"
         fi
     elif [ "{os_type}" = "darwin" ]; then
         log_error "macOS 请先启动 Docker Desktop 或通过 Homebrew 安装: brew install --cask docker"
@@ -760,18 +772,35 @@ if [ -z "$CONTAINER_CLI" ]; then
     exit 1
 fi
 
+if ! $CONTAINER_CLI info >/dev/null 2>&1; then
+    if [ "{os_type}" = "linux" ] && [ "$EUID" -eq 0 ]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl enable --now docker
+        elif command -v rc-service >/dev/null 2>&1; then
+            rc-update add docker default
+            rc-service docker start
+        fi
+    fi
+fi
+if ! $CONTAINER_CLI info >/dev/null 2>&1; then
+    log_error "Docker 不可访问，请检查服务、权限或启动 Docker Desktop；原容器未改变"
+    exit 1
+fi
+ENDPOINT="${{DOCKER_HOST:-$(docker context inspect --format '{{{{.Endpoints.docker.Host}}}}')}}"
+case "$ENDPOINT" in
+    unix://*) ;;
+    *) log_error "请切换到本机 Docker 上下文，拒绝操作远程主机"; exit 1 ;;
+esac
 log_ok "使用容器引擎: $CONTAINER_CLI"
 # 镜像先拉取，任何失败都不会修改旧容器或配置。
 $CONTAINER_CLI pull "$IMAGE"
 IMAGE_ID=$($CONTAINER_CLI image inspect --format '{{{{.Id}}}}' "$IMAGE")
+# Docker Desktop 的挂载源在 Linux VM 内，不能以 macOS 宿主机的 -S 判断。
 SOCKET="/var/run/docker.sock"
-if [ "$CONTAINER_CLI" = "podman" ]; then
-    SOCKET="${{XDG_RUNTIME_DIR:-/run}}/podman/podman.sock"
-    [ -S "$SOCKET" ] || SOCKET="/run/podman/podman.sock"
-fi
+if [ "{os_type}" = "linux" ]; then SOCKET="${{ENDPOINT#unix://}}"; fi
 if $CONTAINER_CLI inspect frp-agent >/dev/null 2>&1; then
-    if [ ! -S "$SOCKET" ]; then
-        log_error "引擎 Socket 不可用，请先启动 docker 或 podman.socket；旧容器未改变"
+    if [ "{os_type}" != "darwin" ] && [ ! -S "$SOCKET" ]; then
+        log_error "Docker Socket 不可用，请先启动 Docker；旧容器未改变"
         exit 1
     fi
     JOB_ARGS=()
@@ -831,7 +860,7 @@ log_ok "本地配置文件已创建 (0600 权限)"
 
 log_info "[4/5] 新安装，正在使用已验证拉取的镜像启动..."
 SOCK_ARGS=()
-if [ -S "$SOCKET" ]; then
+if [ "{os_type}" = "darwin" ] || [ -S "$SOCKET" ]; then
     SOCK_ARGS=(-v "$SOCKET:/var/run/docker.sock")
 fi
 

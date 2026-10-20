@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "用法: bash uninstall.sh server|client [--purge] [--yes] [--dir 路径] [--runtime docker|podman] [--project Compose项目名]"
+    echo "用法: bash uninstall.sh server|client [--purge] [--yes] [--dir 路径] [--runtime docker] [--project Compose项目名]"
     echo "默认只删除本项目容器，保留配置、数据库、证书和日志。"
     echo "--purge 额外删除已确认归属的项目数据；--yes 跳过确认。"
     echo "必须使用部署时的账号/权限和容器上下文；不会跨 root/rootless 用户搜索。"
@@ -39,9 +39,8 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 case "$RUNTIME" in
-    auto) CLIS="docker podman" ;;
-    docker|podman) CLIS=$RUNTIME ;;
-    *) echo "[ERROR] --runtime 仅支持 docker 或 podman" >&2; exit 2 ;;
+    auto|docker) CLIS="docker" ;;
+    *) echo "[ERROR] --runtime 仅支持 docker" >&2; exit 2 ;;
 esac
 if [ "$MODE" = server ]; then
     if [ "$EUID" -ne 0 ]; then
@@ -117,6 +116,15 @@ for cli in $CLIS; do
             frps) component=frps ;;
             frp-agent) component=frp-agent ;;
         esac
+        # 安装/升级使用不可变镜像 ID；先从镜像元数据核实仓库归属。
+        if [[ "$image" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            refs=$("$cli" image inspect --format '{{range .RepoTags}}{{println .}}{{end}}{{range .RepoDigests}}{{println .}}{{end}}' "$image" 2>/dev/null || true)
+            for ref in $refs; do
+                case "$ref" in
+                    "$REGISTRY/$component":*|"$REGISTRY/$component"@*) image="$ref"; break ;;
+                esac
+            done
+        fi
         case "$image" in
             "$REGISTRY/$component"|"$REGISTRY/$component":*|"$REGISTRY/$component"@*) ;;
             *) echo "[WARN] $cli 容器 $name 不使用本项目镜像，跳过且保留主机数据以免误删"; FAILED=1; continue ;;

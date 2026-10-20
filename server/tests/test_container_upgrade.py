@@ -190,11 +190,79 @@ def test_http_200_pull_error_stream_is_failure(monkeypatch):
         def getresponse(self): return Response()
         def close(self): pass
     monkeypatch.setattr(upgrade, "UnixConnection", Connection)
+    engine = upgrade.Engine()
+    engine._api_version = "1.47"  # negotiation is tested separately
     with pytest.raises(RuntimeError, match="拉取错误"):
-        upgrade.Engine().pull(upgrade.image_for("server", "v2.0.0"))
+        engine.pull(upgrade.image_for("server", "v2.0.0"))
 
 
 @pytest.mark.parametrize("version", ["latest", "v1.0.0;touch /tmp/unsafe", "v1.2", "v1.2.3-beta"])
 def test_version_allowlist(version):
     with pytest.raises(ValueError):
         upgrade.normalize_version(version)
+
+
+def test_engine_negotiates_and_reuses_version_for_requests_and_pull(monkeypatch):
+    import json
+    paths = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, path):
+            self.path = path
+
+        def read(self):
+            return json.dumps({"ApiVersion": "1.47"} if self.path == "/version" else {"Id": "fixture"}).encode()
+
+        def readline(self):
+            return b""
+
+    class Connection:
+        def __init__(self, *args): pass
+        def request(self, method, path, *args):
+            self.path = path
+            paths.append(path)
+        def getresponse(self): return Response(self.path)
+        def close(self): pass
+
+    monkeypatch.setattr(upgrade, "UnixConnection", Connection)
+    engine = upgrade.Engine()
+    engine.inspect("frp-server")
+    engine.image("repo/test:v2.0.0")
+    engine.pull("repo/test:v2.0.0")
+    assert paths == ["/version", "/v1.47/containers/frp-server/json",
+                     "/v1.47/images/repo%2Ftest%3Av2.0.0/json",
+                     "/v1.47/images/create?fromImage=repo%2Ftest%3Av2.0.0"]
+
+
+def test_payload_handles_null_mounts_preserves_devices_namespaces_and_run_mount(environment):
+    engine, _ = environment
+    old = engine.inspect("old-id")
+    old["HostConfig"].update(Mounts=None, PidMode="host", IpcMode="host", UsernsMode="host",
+                             Devices=[{"PathOnHost": "/dev/net/tun", "PathInContainer": "/dev/net/tun", "CgroupPermissions": "rwm"}])
+    old["Mounts"].append({"Type": "bind", "Source": "/host/run/cert", "Destination": "/run/cert", "RW": False})
+    payload = upgrade.container_payload(old, engine.image("old-image"), engine.image("new-image"))
+    for key in ("PidMode", "IpcMode", "UsernsMode", "Devices"):
+        assert payload["HostConfig"][key] == old["HostConfig"][key]
+    assert payload["HostConfig"]["Mounts"] == [{"Type": "bind", "Source": "/host/run/cert", "Target": "/run/cert", "ReadOnly": True}]
+
+
+def test_payload_does_not_duplicate_windows_bind_destination(environment):
+    engine, _ = environment
+    old = engine.inspect("old-id")
+    old["HostConfig"]["Binds"] = ["C:\\frp:/opt/frp"]
+    old["Mounts"] = [{"Type": "bind", "Source": "/host_mnt/c/frp", "Destination": "/opt/frp", "RW": True}]
+    payload = upgrade.container_payload(old, engine.image("old-image"), engine.image("new-image"))
+    assert payload["HostConfig"]["Mounts"] == []
+
+
+def test_payload_replaces_old_image_defaults_with_target_defaults(environment):
+    engine, _ = environment
+    old = engine.inspect("old-id")
+    old_image = engine.image("old-image")
+    old_image["Config"].update(Cmd=old["Config"]["Cmd"], Entrypoint=["old-entrypoint"])
+    old["Config"]["Entrypoint"] = ["old-entrypoint"]
+    payload = upgrade.container_payload(old, old_image, engine.image("new-image"))
+    assert "Cmd" not in payload and "Entrypoint" not in payload
+    assert not any(item.startswith("APP_VERSION=") for item in payload["Env"])

@@ -3,7 +3,7 @@ param(
     [switch]$Purge,
     [switch]$Force,
     [string]$InstallDir = "C:\frp",
-    [ValidateSet("auto", "docker", "podman")]
+    [ValidateSet("auto", "docker")]
     [string]$Runtime = "auto"
 )
 $ErrorActionPreference = "Stop"
@@ -16,7 +16,7 @@ if ((Test-Path -LiteralPath $InstallDir) -and
     ((Get-Item -LiteralPath $InstallDir).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
     throw "不能通过符号链接或目录联接清理数据目录。"
 }
-Write-Host "[INFO] 只移除 frp-agent 项目容器，不卸载 Docker/Podman，不终止其他 FRP 进程。"
+Write-Host "[INFO] 只移除 frp-agent 项目容器，不卸载 Docker，不终止其他 FRP 进程。"
 if ($Purge) {
     Write-Warning "将额外删除已确认归属的配置和日志: $InstallDir，此操作不可恢复。"
 } else {
@@ -28,7 +28,7 @@ if (-not $Force -and (Read-Host "输入 REMOVE 确认") -cne "REMOVE") {
 }
 $available = $false
 $owned = Test-Path -LiteralPath (Join-Path $InstallDir '.frp-all-in-one-client') -PathType Leaf
-$engines = if ($Runtime -eq 'auto') { @('docker', 'podman') } else { @($Runtime) }
+$engines = @('docker')
 foreach ($cli in $engines) {
     if (-not (Get-Command $cli -ErrorAction SilentlyContinue)) { continue }
     # Windows PowerShell 将原生命令 stderr 作为错误流，检测失败时只跳过该引擎。
@@ -50,6 +50,12 @@ foreach ($cli in $engines) {
         $ErrorActionPreference = $oldPreference
     }
     if (-not $exists) { continue }
+    if ($image -match '^sha256:[a-f0-9]{64}$') {
+        $refs = & $cli image inspect --format '{{range .RepoTags}}{{println .}}{{end}}{{range .RepoDigests}}{{println .}}{{end}}' $image
+        if ($LASTEXITCODE -ne 0) { throw "无法核实客户端镜像归属，已保留容器及数据。" }
+        $matched = @($refs | Where-Object { $_ -match '^sgccr\.ccs\.tencentyun\.com/frp-all-in-one/frp-agent(?::[^\s]+|@[^\s]+)$' })
+        if ($matched.Count -gt 0) { $image = $matched[0] }
+    }
     if ($image -notmatch '^sgccr\.ccs\.tencentyun\.com/frp-all-in-one/frp-agent(?::[^\s]+|@[^\s]+)?$') {
         throw "$cli 中的 frp-agent 不使用本项目镜像，已中止并保留数据以免误删。"
     }
@@ -70,7 +76,7 @@ foreach ($cli in $engines) {
     if ($LASTEXITCODE -ne 0) { throw "客户端移除失败，配置和日志已保留。" }
 }
 if (-not $available) {
-    throw "当前账号没有可用的容器引擎。请启动 Docker Desktop/Podman，并使用部署时的账号重试。"
+    throw "当前账号没有可用的容器引擎。请启动 Docker Desktop，并使用部署时的账号重试。"
 }
 if ($Purge -and (Test-Path -LiteralPath $InstallDir)) {
     if ($owned) {

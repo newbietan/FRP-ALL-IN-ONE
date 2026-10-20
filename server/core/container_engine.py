@@ -13,9 +13,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-PODMAN_BIN = os.environ.get("PODMAN_BIN", "podman")
-PODMAN_TIMEOUT = int(os.environ.get("PODMAN_TIMEOUT", "30"))
-PODMAN_URL = os.environ.get("PODMAN_URL", "").strip()
+DOCKER_TIMEOUT = int(os.environ.get("DOCKER_TIMEOUT", "30"))
 
 
 def _is_executable(filepath: str) -> bool:
@@ -137,21 +135,18 @@ class FRPSProcessManager:
         return cls._process is not None and cls._process.poll() is None
 
 
-def run_podman(
+def run_docker(
     args: list[str],
     timeout: int | None = None,
     capture_output: bool = True,
     text: bool = True,
     check: bool = False,
 ) -> subprocess.CompletedProcess:
-    """执行 Podman 命令（历史回退，单容器架构下已不再强制需要）"""
+    """执行 Docker 命令（仅供历史多容器部署回退使用）。"""
     if timeout is None:
-        timeout = PODMAN_TIMEOUT
+        timeout = DOCKER_TIMEOUT
 
-    command = [PODMAN_BIN]
-    if PODMAN_URL:
-        command.extend(["--url", PODMAN_URL])
-    command.extend(args)
+    command = ["docker", *args]
 
     return subprocess.run(
         command,
@@ -167,7 +162,7 @@ def restart_frps_service(timeout: int = 15) -> subprocess.CompletedProcess:
     重启 FRPS 服务：
     1. 优先使用内置子进程管理（单容器全合一模式，无任何外部 Socket 或 systemd 依赖）；
     2. 其次回退至原生 systemctl restart frps；
-    3. 最后回退至 podman restart frps。
+    3. 最后回退至 docker restart frps。
     """
     # 1. 单容器全合一模式：直接检查本地是否存在 frps 可执行文件
     if FRPSProcessManager.get_frps_bin():
@@ -193,15 +188,15 @@ def restart_frps_service(timeout: int = 15) -> subprocess.CompletedProcess:
             logger.debug("通过 systemctl 重启 frps 异常: %s", e)
 
     # 3. 容器引擎回退
-    if shutil.which(PODMAN_BIN):
+    if shutil.which("docker"):
         try:
-            return run_podman(["restart", "frps"], timeout=timeout)
+            return run_docker(["restart", "frps"], timeout=timeout)
         except Exception as e:
-            logger.debug("通过 podman 重启 frps 异常: %s", e)
+            logger.debug("通过 docker 重启 frps 异常: %s", e)
 
     return subprocess.CompletedProcess(
         args=["restart", "frps"],
         returncode=1,
         stdout="",
-        stderr="未检测到 frps 二进制、systemctl 或 podman 容器",
+        stderr="未检测到 frps 二进制、systemctl 或 Docker 容器",
     )

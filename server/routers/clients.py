@@ -144,9 +144,12 @@ def read_clients(
 ):
     """获取客户端列表"""
     clients = crud.get_clients(db, skip=skip, limit=limit)
-    for client in clients:
-        client.agent_info = _build_client_agent_info(db, client.id)
-    return clients
+    return [
+        schemas.Client.model_validate(client).model_copy(
+            update={"agent_info": _build_client_agent_info(db, client.id)}
+        )
+        for client in clients
+    ]
 
 
 @router.get("/{client_id}", response_model=schemas.Client)
@@ -159,8 +162,9 @@ def read_client(
     db_client = crud.get_client(db, client_id=client_id)
     if db_client is None:
         raise HTTPException(status_code=404, detail="Client not found")
-    db_client.agent_info = _build_client_agent_info(db, db_client.id)
-    return db_client
+    return schemas.Client.model_validate(db_client).model_copy(
+        update={"agent_info": _build_client_agent_info(db, db_client.id)}
+    )
 
 
 @router.delete("/{client_id}")
@@ -197,9 +201,10 @@ async def update_client(
         crud.update_client_remark(db, client_id=client_id, new_remark=payload.remark)
 
     db.refresh(client)
-    client.agent_info = _build_client_agent_info(db, client_id)
     await _broadcast_dashboard_sync(db)
-    return client
+    return schemas.Client.model_validate(client).model_copy(
+        update={"agent_info": _build_client_agent_info(db, client_id)}
+    )
 
 
 @router.post("/{client_id}/tunnels/", response_model=schemas.Tunnel)
@@ -231,7 +236,10 @@ async def update_tunnel_for_client(
     if not tunnel:
         raise HTTPException(status_code=404, detail="Tunnel not found")
     if "enabled" in payload:
-        updated = crud.set_tunnel_enabled(db, tunnel_id=tunnel_id, enabled=payload.get("enabled"))
+        enabled = payload["enabled"]
+        if not isinstance(enabled, bool):
+            raise HTTPException(status_code=422, detail="enabled must be a boolean")
+        updated = crud.set_tunnel_enabled(db, tunnel_id=tunnel_id, enabled=enabled)
         await _push_config_for_client(client_id)
         return updated
     raise HTTPException(status_code=400, detail="No supported fields")

@@ -9,8 +9,9 @@ import re
 import secrets
 from typing import Any
 
-from core.container_engine import restart_frps_service
 import httpx
+
+from core.container_engine import restart_frps_service
 
 logger = logging.getLogger(__name__)
 

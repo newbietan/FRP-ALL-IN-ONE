@@ -23,7 +23,7 @@ fi
 cd "$SCRIPT_DIR"
 COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
 COMPOSE_MODE=""
-CONTAINER_CLI="podman"
+CONTAINER_CLI="docker"
 LOW_MEM_NO_SWAP="0"
 PUBLIC_IP=""
 PROJECT_CONTAINERS="frp-server frp-manager-backend frp-manager-web frps"
@@ -96,148 +96,44 @@ detect_os() {
     echo "[INFO] 检测到系统: ${PRETTY_NAME:-$OS_ID}"
 }
 
-install_podman_stack() {
-    echo "[INSTALL] 安装 Podman 与 compose 支持..."
-
-    if command -v podman >/dev/null 2>&1 && (podman compose version >/dev/null 2>&1 || command -v podman-compose >/dev/null 2>&1); then
-        echo -e "${GREEN}[OK] Podman 环境已就绪${NC}"
-        return
-    fi
-
+install_docker_stack() {
+    echo "[INSTALL] 安装 Docker 与 Compose..."
     case "$OS_ID" in
         alpine)
-            apk update
-            apk add --no-cache podman podman-compose curl ca-certificates lsof
+            apk add --no-cache docker docker-cli-compose curl ca-certificates lsof
             ;;
         debian|ubuntu)
             apt-get update
-            apt-get install -y podman podman-compose curl ca-certificates lsof
-            ;;
-        centos|rhel|rocky|almalinux|fedora)
-            if command -v dnf >/dev/null 2>&1; then
-                dnf install -y podman podman-compose curl ca-certificates lsof
-            else
-                yum install -y podman podman-compose curl ca-certificates lsof
-            fi
+            apt-get install -y docker.io docker-compose curl ca-certificates lsof
             ;;
         *)
-            if echo "$OS_LIKE" | grep -q "debian"; then
-                apt-get update
-                apt-get install -y podman podman-compose curl ca-certificates lsof
-            elif echo "$OS_LIKE" | grep -Eq "rhel|fedora|centos"; then
-                if command -v dnf >/dev/null 2>&1; then
-                    dnf install -y podman podman-compose curl ca-certificates lsof
-                else
-                    yum install -y podman podman-compose curl ca-certificates lsof
-                fi
-            else
-                echo -e "${RED}[ERROR] 暂不支持该发行版自动安装，请手动安装 Podman + podman-compose${NC}"
-                exit 1
-            fi
+            echo "[ERROR] 请按 https://docs.docker.com/engine/install/ 安装 Docker Engine 和 Compose 后重试" >&2
+            exit 1
             ;;
     esac
-
-    if ! command -v podman >/dev/null 2>&1; then
-        echo -e "${RED}[ERROR] Podman 安装失败${NC}"
-        exit 1
-    fi
-    if ! podman compose version >/dev/null 2>&1 && ! command -v podman-compose >/dev/null 2>&1; then
-        echo -e "${RED}[ERROR] podman compose 不可用，请安装 podman-compose${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}[OK] Podman 安装完成${NC}"
-}
-
-check_podman_version() {
-    echo ""
-    echo "[CHECK] 检查 Podman 版本..."
-
-    PODMAN_VER=$(podman --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    PODMAN_MAJOR=$(echo "$PODMAN_VER" | cut -d. -f1)
-
-    if [ -z "$PODMAN_VER" ]; then
-        echo -e "${RED}[ERROR] 无法获取 Podman 版本${NC}"
-        exit 1
-    fi
-
-    echo "   当前 Podman 版本: $PODMAN_VER"
-
-    if [ "$PODMAN_MAJOR" -lt 4 ]; then
-        echo -e "${YELLOW}[WARN] Podman $PODMAN_VER 版本过低，后端容器要求 4.x${NC}"
-        echo "   低版本会导致后端无法管理 FRPS 容器（API 版本不兼容）"
-        echo ""
-
-        UPGRADE_DONE="0"
-        case "$OS_ID" in
-            ubuntu|debian)
-                echo "正在通过 Kubic 仓库升级 Podman..."
-                mkdir -p /etc/apt/keyrings
-                curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$(lsb_release -rs)/Release.key" \
-                    | gpg --dearmor -o /etc/apt/keyrings/kubic-podman.gpg 2>/dev/null || true
-                echo "deb [signed-by=/etc/apt/keyrings/kubic-podman.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$(lsb_release -rs)/ /" \
-                    > /etc/apt/sources.list.d/kubic-podman.list
-                apt-get update -qq
-                if apt-get install -y podman; then
-                    UPGRADE_DONE="1"
-                fi
-                ;;
-        esac
-
-        if [ "$UPGRADE_DONE" = "1" ]; then
-            PODMAN_VER=$(podman --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-            echo -e "${GREEN}[OK] Podman 已升级到 $PODMAN_VER${NC}"
-        else
-            echo -e "${RED}[ERROR] 自动升级失败，请手动升级 Podman 到 4.x 后重试${NC}"
-            echo "   参考: https://podman.io/docs/installation"
-            exit 1
-        fi
-    else
-        echo -e "${GREEN}[OK] Podman 版本兼容${NC}"
-    fi
 }
 
 detect_container_stack() {
-    echo ""
-    echo "[CHECK] 检测容器运行时环境 (Docker / Podman)..."
-
-    # 1. 优先检测 Docker 环境
-    if command -v docker >/dev/null 2>&1; then
-        if docker compose version >/dev/null 2>&1; then
-            CONTAINER_CLI="docker"
-            COMPOSE_MODE="docker-compose-plugin"
-            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Docker + docker compose${NC}"
-            return
-        elif command -v docker-compose >/dev/null 2>&1; then
-            CONTAINER_CLI="docker"
-            COMPOSE_MODE="docker-compose"
-            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Docker + docker-compose${NC}"
-            return
+    if ! command -v docker >/dev/null 2>&1; then
+        install_docker_stack
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl enable --now docker
+        elif command -v rc-service >/dev/null 2>&1; then
+            rc-update add docker default
+            rc-service docker start
         fi
     fi
-
-    # 2. 其次检测已存在的 Podman 环境
-    if command -v podman >/dev/null 2>&1; then
-        if podman compose version >/dev/null 2>&1; then
-            CONTAINER_CLI="podman"
-            COMPOSE_MODE="podman"
-            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Podman + podman compose${NC}"
-            check_podman_version
-            return
-        elif command -v podman-compose >/dev/null 2>&1; then
-            CONTAINER_CLI="podman"
-            COMPOSE_MODE="podman-compose"
-            echo -e "${GREEN}[OK] 检测到已就绪的容器环境: Podman + podman-compose${NC}"
-            check_podman_version
-            return
-        fi
+    docker info >/dev/null 2>&1 || { echo "[ERROR] Docker 不可用，请检查服务和权限" >&2; exit 1; }
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE_MODE="docker-compose-plugin"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE_MODE="docker-compose"
+    else
+        echo "[ERROR] 请安装 Docker Compose 后重试" >&2
+        exit 1
     fi
-
-    # 3. 若均未就绪，自动安装 Podman 栈
-    CONTAINER_CLI="podman"
-    install_podman_stack
-    check_podman_version
-    detect_compose_mode
 }
 
 run_compose() {
@@ -247,12 +143,6 @@ run_compose() {
             ;;
         "docker-compose")
             docker-compose -f "$COMPOSE_FILE" "$@"
-            ;;
-        "podman")
-            podman compose -f "$COMPOSE_FILE" "$@"
-            ;;
-        "podman-compose")
-            podman-compose -f "$COMPOSE_FILE" "$@"
             ;;
         *)
             echo -e "${RED}[ERROR] 未识别的 compose 模式: $COMPOSE_MODE${NC}"
@@ -266,15 +156,6 @@ ensure_container_socket() {
     echo "[CHECK] 检查并配置容器管理 Socket（支持 Web 控制台一键平滑升级）..."
     if [ -S "/var/run/docker.sock" ]; then
         echo -e "${GREEN}[OK] 检测到宿主机 Docker Socket: /var/run/docker.sock${NC}"
-    elif [ -S "/run/podman/podman.sock" ]; then
-        ln -sf /run/podman/podman.sock /var/run/docker.sock 2>/dev/null || true
-        echo -e "${GREEN}[OK] 已关联 Podman Socket 至 /var/run/docker.sock${NC}"
-    elif command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "podman.socket"; then
-        systemctl enable --now podman.socket 2>/dev/null || true
-        if [ -S "/run/podman/podman.sock" ]; then
-            ln -sf /run/podman/podman.sock /var/run/docker.sock 2>/dev/null || true
-            echo -e "${GREEN}[OK] 已启动 podman.socket 并关联至 /var/run/docker.sock${NC}"
-        fi
     else
         echo -e "${YELLOW}[INFO] 未检测到容器管理 Socket，支持通过一键升级脚本完成更新${NC}"
     fi
@@ -341,7 +222,7 @@ cleanup_existing_project_containers() {
         run_compose down --remove-orphans >/dev/null 2>&1 || true
     fi
 
-    # 2. 强制删除所有可能残留的项目容器（无论通过 docker 还是 podman）
+    # 2. 清理 Docker 中残留的项目容器
     for container_name in $PROJECT_CONTAINERS; do
         if $CONTAINER_CLI inspect "$container_name" >/dev/null 2>&1; then
             echo -e "${YELLOW}[WARN] 发现旧容器: ${container_name}，正在强制清理...${NC}"
@@ -377,7 +258,8 @@ ensure_compose_file() {
 ---
 services:
   server:
-    image: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest
+    image: >-
+      ${FRP_IMAGE:-sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:latest}
     container_name: frp-server
     restart: always
     network_mode: host
@@ -386,7 +268,7 @@ services:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
-      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.enable=false"
 COMPOSE_EOF
     echo -e "${GREEN}[OK] compose.yml 已就绪${NC}"
 }
@@ -478,16 +360,6 @@ show_info() {
             echo "   查看日志: docker-compose -f compose.yml logs -f"
             echo "   重启服务: docker-compose -f compose.yml restart"
             echo "   停止服务: docker-compose -f compose.yml down"
-            ;;
-        "podman")
-            echo "   查看日志: podman compose -f compose.yml logs -f"
-            echo "   重启服务: podman compose -f compose.yml restart"
-            echo "   停止服务: podman compose -f compose.yml down"
-            ;;
-        *)
-            echo "   查看日志: podman-compose -f compose.yml logs -f"
-            echo "   重启服务: podman-compose -f compose.yml restart"
-            echo "   停止服务: podman-compose -f compose.yml down"
             ;;
     esac
     echo ""
