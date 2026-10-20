@@ -20,13 +20,13 @@ WORKDIR /build/agent
 
 # 静态多架构交叉编译客户端 Agent (利用 Go 原生跨平台交叉编译)
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -ldflags="-s -w -X main.version=${AGENT_VERSION:-3.2.10}" -o /build/frp-agent ./cmd/frp-agent
+    go build -ldflags="-s -w -X main.version=${AGENT_VERSION:-3.2.11}" -o /build/frp-agent ./cmd/frp-agent
 
 # ==============================================================================
 # 运行时镜像：Alpine + 标准库 Python 升级事务执行器
 # ==============================================================================
 FROM alpine:3.20
-ARG AGENT_VERSION=3.2.10
+ARG AGENT_VERSION=3.2.11
 LABEL io.frp-all-in-one.version="v${AGENT_VERSION}" \
       io.frp-all-in-one.role="agent" \
       io.frp-all-in-one.upgrade-protocol="1"

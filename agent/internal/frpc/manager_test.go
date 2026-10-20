@@ -53,4 +53,28 @@ func TestTemporaryConfigIsRecognizedAsTOML(t *testing.T) {
 	if err != nil || len(result.Proxies) != 1 {
 		t.Fatalf("temporary config not parsed correctly: %v", err)
 	}
+	if err := completeAndValidateConfig(result); err != nil {
+		t.Fatalf("ordinary tunnel rejected during preflight: %v", err)
+	}
+	if mode := result.Proxies[0].GetBaseConfig().Transport.BandwidthLimitMode; mode != "client" {
+		t.Fatalf("missing default bandwidth mode: %q", mode)
+	}
+}
+
+func TestPreflightCompletesVisitorDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frpc.toml.next")
+	content := "serverAddr = \"127.0.0.1\"\nserverPort = 7000\n[[visitors]]\nname = \"visitor\"\ntype = \"stcp\"\nserverName = \"peer\"\nbindPort = 6001\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := config.LoadClientConfigResult(path, false)
+	if err != nil || len(result.Visitors) != 1 {
+		t.Fatalf("visitor not parsed correctly: %v", err)
+	}
+	if err := completeAndValidateConfig(result); err != nil {
+		t.Fatalf("visitor rejected during preflight: %v", err)
+	}
+	if addr := result.Visitors[0].GetBaseConfig().BindAddr; addr != "127.0.0.1" {
+		t.Fatalf("missing default bind address: %q", addr)
+	}
 }

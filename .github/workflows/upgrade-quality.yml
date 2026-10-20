@@ -39,9 +39,9 @@ jobs:
           pytest pytest-asyncio
       - name: Test backend and generated scripts
         run: PYTHONPATH=server python -m pytest -q server/tests
-      - name: Test Agent
+      - name: Test Agent with race detector
         working-directory: agent
-        run: go test ./...
+        run: go test -race -count=1 -timeout=120s ./...
       - name: Test real Docker upgrade and rollback on isolated runner
         run: |
           sudo -E env "PATH=$PATH" PYTHONPATH=server FRP_DOCKER_INTEGRATION=1 \
