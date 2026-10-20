@@ -2,7 +2,7 @@
 # 用于交叉编译各平台版本
 
 BINARY_NAME=frp-agent
-VERSION=3.2.9
+VERSION=3.2.10
 BUILD_TIME=$(shell date +%Y-%m-%d_%H:%M:%S)
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
 

@@ -255,6 +255,19 @@ jobs:
     if: needs.resolve-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Select release notes
+        id: notes
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          notes="docs/releases/${VERSION}.md"
+          if [ -f "$notes" ]; then
+            echo "path=$notes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download agent binaries
         uses: actions/download-artifact@v4
         with:
@@ -266,6 +279,7 @@ jobs:
         with:
           tag_name: ${{ needs.resolve-version.outputs.version }}
           name: FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
+          body_path: ${{ steps.notes.outputs.path }}
           body: |
             ## FRP-ALL-IN-ONE ${{ needs.resolve-version.outputs.version }}
 

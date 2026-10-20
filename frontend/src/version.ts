@@ -4,12 +4,12 @@
  * 构建时可通过环境变量覆盖：
  *   VITE_APP_VERSION=2.5.1 npm run build
  *
- * 本地开发默认使用 'dev'，生产构建使用 package.json 中的版本号或环境变量
+ * 默认版本跟随当前发布版本；生产构建可通过环境变量覆盖
  */
 export const APP_VERSION: string =
   (import.meta as any).env?.VITE_APP_VERSION ||
   (import.meta as any).env?.VITE_APP_VERSION_NAME ||
-  'v3.2.9';
+  'v3.2.10';
 
 /** 格式化显示版本（如 "V2.4.0-Stable"） */
 export const APP_VERSION_DISPLAY = `V${APP_VERSION.replace(/^v/i, '')}`;
