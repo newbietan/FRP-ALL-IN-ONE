@@ -117,13 +117,14 @@ detect_container_stack() {
     if ! command -v docker >/dev/null 2>&1; then
         install_docker_stack
     fi
-    if ! docker info >/dev/null 2>&1; then
-        if command -v systemctl >/dev/null 2>&1; then
-            systemctl enable --now docker
-        elif command -v rc-service >/dev/null 2>&1; then
-            rc-update add docker default
-            rc-service docker start
-        fi
+    # Docker 正在运行不代表已开机自启；每次部署都确保宿主机服务已启用。
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable --now docker || echo "[WARN] 无法启用 Docker 开机自启，请手动检查 systemctl is-enabled docker" >&2
+    elif command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+        rc-update add docker default || echo "[WARN] 无法将 Docker 加入 OpenRC 默认启动级别" >&2
+        rc-service docker start || echo "[WARN] Docker 服务启动失败，请检查 rc-service docker status" >&2
+    else
+        echo "[WARN] 未检测到 systemd/OpenRC，请手动配置 Docker 开机自启；容器重启策略依赖 Docker 启动" >&2
     fi
     docker info >/dev/null 2>&1 || { echo "[ERROR] Docker 不可用，请检查服务和权限" >&2; exit 1; }
     if docker compose version >/dev/null 2>&1; then
@@ -347,6 +348,10 @@ show_info() {
     echo "[移除本项目（保留数据库、证书与配置）]"
     printf '   curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | sudo bash -s -- server --dir %q\n' "$SCRIPT_DIR"
     echo "   完整清理需在末尾加 --purge 并输入 REMOVE 确认；客户端需在各自设备上单独移除。"
+    echo ""
+    echo "[开机自启与异常重启]"
+    echo "   frp-server 容器已配置 restart: always，Docker 启动后会自动恢复。"
+    echo "   请留意上方 Docker 开机自启检查警告；手动 Compose 部署需自行启用 Docker 服务。"
     echo ""
     echo "[常用命令]"
     echo "   部署工作目录: cd $SCRIPT_DIR"

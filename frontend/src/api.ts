@@ -95,7 +95,7 @@ export interface ClientData {
   remark?: string | null;
   auth_token: string;
   status: 'online' | 'offline';
-  last_seen: string;
+  last_seen: number; // Unix timestamp in seconds; 0 means no heartbeat yet.
   created_at: string;
   tunnels: TunnelData[];
   agent_info?: AgentInfoData;
