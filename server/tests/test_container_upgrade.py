@@ -266,3 +266,52 @@ def test_payload_replaces_old_image_defaults_with_target_defaults(environment):
     payload = upgrade.container_payload(old, old_image, engine.image("new-image"))
     assert "Cmd" not in payload and "Entrypoint" not in payload
     assert not any(item.startswith("APP_VERSION=") for item in payload["Env"])
+
+
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_exec_waits_for_detached_command_to_finish(monkeypatch, exit_code):
+    engine = upgrade.Engine()
+    calls = []
+    states = iter([{"Running": True, "ExitCode": None}, {"Running": False, "ExitCode": exit_code}])
+
+    def request(method, path, body=None):
+        calls.append((method, path, body))
+        if path.endswith("/exec"):
+            return {"Id": "health-exec"}
+        if path.endswith("/start"):
+            return {}
+        return next(states)
+
+    monkeypatch.setattr(engine, "request", request)
+    monkeypatch.setattr(upgrade.time, "sleep", lambda _: None)
+    assert engine.exec("candidate", ["python3", "-c", "pass"]) is (exit_code == 0)
+    assert ("POST", "/exec/health-exec/start", {"Detach": True, "Tty": False}) in calls
+    assert sum(path.endswith("/json") for _, path, _ in calls) == 2
+
+
+def test_exec_has_a_bounded_wait_for_stuck_command(monkeypatch):
+    import itertools
+    from types import SimpleNamespace
+
+    ticks = itertools.count(0, 6)
+    monkeypatch.setattr(upgrade, "time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=lambda _: None))
+    engine = upgrade.Engine()
+    monkeypatch.setattr(engine, "request", lambda *args, **kwargs: {"Id": "exec", "Running": True})
+    with pytest.raises(RuntimeError, match="执行超时"):
+        engine.exec("candidate", ["fixture"])
+
+
+def test_health_timeout_preserves_last_engine_error(environment, monkeypatch):
+    import itertools
+    from types import SimpleNamespace
+
+    engine, _ = environment
+    ticks = itertools.count(0, 2)
+    monkeypatch.setattr(upgrade, "time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=lambda _: None))
+
+    def failed_exec(*args):
+        raise RuntimeError("HTTP 400: fixture failure")
+
+    monkeypatch.setattr(engine, "exec", failed_exec)
+    with pytest.raises(RuntimeError, match="HTTP 400: fixture failure"):
+        upgrade.wait_healthy(engine, "old-id", ["fixture"], timeout=3)

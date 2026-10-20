@@ -1,4 +1,5 @@
 """Opt-in, disposable real-Docker tests. Run as root in an isolated CI runner."""
+import json
 import os
 import subprocess
 import time
@@ -61,8 +62,10 @@ def test_real_docker_success_and_rollback(images, tmp_path, monkeypatch, fail):
                 break
             time.sleep(0.5)
         else:
-            pytest.fail("worker did not complete: " + str(upgrade.read_status(path)))
-        assert state["step"] == ("rolled_back" if fail else "succeeded"), state
+            pytest.fail("worker did not complete: " + json.dumps(upgrade.read_status(path)))
+        assert state["step"] == ("rolled_back" if fail else "succeeded"), json.dumps(state, ensure_ascii=False)
+        if fail:
+            assert state.get("candidate_id") and "健康检查" in (state.get("error") or ""), json.dumps(state, ensure_ascii=False)
         current = engine.inspect(name)
         assert current["State"]["Running"]
         assert "SECRET_KEY=keep-me" in current["Config"]["Env"]

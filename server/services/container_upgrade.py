@@ -165,9 +165,16 @@ class Engine:
         result = self.request("POST", f"/containers/{container}/exec", {
             "Cmd": command, "AttachStdout": False, "AttachStderr": False})
         exec_id = result["Id"]
-        self.request("POST", f"/exec/{exec_id}/start", {"Detach": False, "Tty": False})
-        state = self.request("GET", f"/exec/{exec_id}/json")
-        return not state.get("Running") and state.get("ExitCode") == 0
+        # With no attached streams Docker can return before the process exits.
+        # Detach explicitly (no hijacked HTTP stream), then await its exit status.
+        self.request("POST", f"/exec/{exec_id}/start", {"Detach": True, "Tty": False})
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            state = self.request("GET", f"/exec/{exec_id}/json")
+            if not state.get("Running"):
+                return state.get("ExitCode") == 0
+            time.sleep(0.1)
+        raise RuntimeError("容器健康检查命令执行超时")
 
 
 def container_payload(old: dict, old_image: dict, target: dict) -> dict:
@@ -372,6 +379,7 @@ def health_command(old: dict, role: str, version: str) -> list[str]:
 def wait_healthy(engine: Engine, container: str, command: list[str], timeout=90):
     deadline = time.monotonic() + timeout
     consecutive = 0
+    last_error = "健康检查命令尚未成功退出"
     while time.monotonic() < deadline:
         state = engine.inspect(container).get("State", {})
         if state.get("Running") and not state.get("Restarting"):
@@ -379,12 +387,14 @@ def wait_healthy(engine: Engine, container: str, command: list[str], timeout=90)
                 consecutive = consecutive + 1 if engine.exec(container, command) else 0
                 if consecutive >= 3:
                     return
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError) as exc:
+                last_error = str(exc)
                 consecutive = 0
         else:
+            last_error = "候选容器未运行或正在重启"
             consecutive = 0
         time.sleep(2)
-    raise RuntimeError("新容器未通过连续健康检查（目标版本、管理连接与穿透核心），准备回滚")
+    raise RuntimeError(f"新容器未通过连续健康检查，准备回滚；最后一次检查: {last_error}")
 
 
 def rollback(engine: Engine, path: Path, job: dict, directory: Path):
