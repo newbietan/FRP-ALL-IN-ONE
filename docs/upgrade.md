@@ -61,6 +61,16 @@ FRP_IMAGE=sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server:vX.Y.Z
 
 Docker Desktop 需运行 Linux 容器；host 网络模式还取决于 Desktop 版本及设置。挂载 Docker Socket 等价于授予宿主机管理权限，仅在受信任设备上启用。
 
+## 隧道配置下发与内核重载
+
+隧道记录保存成功不代表客户端已经应用配置。客户端收到新配置后，必须先补全代理、访问者的 FRP 默认值，再校验并替换配置；例如省略 `transport.bandwidthLimitMode` 应使用默认值 `client`，而不是被当作非法空字符串。显式非法值仍须拒绝，旧配置保持不变。
+
+内核重载不再依赖固定的 500ms 延时：启动、停止、重启及配置更新统一串行执行，等待旧核心 `Run` 返回、管理监听和控制连接释放后才创建新核心。退出等待上限为 15 秒；超时会报错并拒绝创建第二个核心，不会强杀占用端口的其他进程。此时旧核心可能处于退出中，不能把“配置已恢复”理解为“旧隧道一定健康”。
+
+新核心创建失败时，会尝试恢复原配置和旧核心。相同配置的正常重连不重复启动核心。对真正由其他进程占用的 `7400` 端口仍需检查冲突进程；不能仅靠延长等待解决外部占用。
+
+修改源码不会自动更新正在运行的客户端。上述修复需要重新构建并部署包含补丁的 Agent 镜像或二进制；仅重启旧镜像不会获得补丁。
+
 ## 状态、备份与异常恢复
 
 标准目录：服务端 `/app/data/upgrade/server.json`，客户端 `/opt/frp/upgrade/agent.json`。备份位于对应数据目录的 `upgrade/backups/<job_id>/`。
@@ -88,6 +98,8 @@ FRP_BUILD_VERSION=vX.Y.Z bash deploy/build-and-push.sh latest
 
 PYTHONPATH=server python -m pytest -q server/tests
 (cd agent && go test ./...)
+# 配置默认值、端口释放、退出超时和并发重载回归：
+(cd agent && go test -race -count=1 -timeout=120s ./internal/frpc)
 ```
 
 `.github/workflows/upgrade-quality.yml` 在隔离的 Linux CI 中额外执行真实 Docker 升级/回滚测试，包括独立辅助容器、桥接网络、环境变量及配置恢复。这些测试默认跳过；只在一次性测试 Docker 环境中以 root 显式设置 `FRP_DOCKER_INTEGRATION=1`。本地单元测试通过不代表生产镜像、Windows/macOS Docker Desktop 或真实网络环境已经验证。

@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	version   = "3.2.10"
+	version   = "3.2.11"
 	buildTime = "unknown"
 )
 
@@ -157,7 +157,9 @@ func main() {
 			}
 		case "restart":
 			log.Println("收到重启命令...")
-			frpcManager.Restart()
+			if err := frpcManager.Restart(); err != nil {
+				log.Printf("FRPC 重启失败: %v", err)
+			}
 		case "upgrade":
 			upgrader.Handle(msg.Data)
 		case "ping":
@@ -197,8 +199,12 @@ func main() {
 
 	log.Println("正在关闭...")
 	sysMonitor.Stop()
-	_ = upgrade.WriteHealth(version, false)
-	frpcManager.Stop()
+	if err := upgrade.WriteHealth(version, false); err != nil {
+		log.Printf("[Health] 写入停止状态失败: %v", err)
+	}
+	if err := frpcManager.Stop(); err != nil {
+		log.Printf("警告: FRPC 停止失败: %v", err)
+	}
 	wsClient.Close()
 	log.Println("Agent 已退出")
 }
