@@ -1,4 +1,4 @@
-"""Docker/Podman transaction runner. Standard library only; shipped in both images.
+"""Docker transaction runner. Standard library only; shipped in both images.
 
 Never remove the old container until the replacement passes health checks. The
 helper is independent of the process being replaced. All durable state lives on
@@ -104,12 +104,26 @@ class UnixConnection(http.client.HTTPConnection):
 class Engine:
     def __init__(self, sock: str = "/var/run/docker.sock"):
         self.sock = sock
+        self._api_version: str | None = None
+
+    def api_path(self, path: str) -> str:
+        # Unversioned resource requests can fall below a modern daemon's minimum
+        # API. /version is the bootstrap endpoint; negotiate once per connection owner.
+        if path == "/version":
+            return path
+        if self._api_version is None:
+            version = self.request("GET", "/version").get("ApiVersion", "")
+            if not re.fullmatch(r"1\.[0-9]+", version):
+                raise RuntimeError("Docker 未返回有效 API 版本")
+            self._api_version = version
+        return f"/v{self._api_version}{path}"
 
     def request(self, method: str, path: str, body=None, *, allowed=(200, 201, 204), timeout=30):
+        api_path = self.api_path(path)
         connection = UnixConnection(self.sock, timeout)
         try:
             encoded = json.dumps(body).encode() if body is not None else None
-            connection.request(method, path, encoded, {"Content-Type": "application/json"})
+            connection.request(method, api_path, encoded, {"Content-Type": "application/json"})
             response = connection.getresponse()
             raw = response.read()
             if response.status not in allowed:
@@ -132,9 +146,10 @@ class Engine:
 
     def pull(self, image: str):
         # Stream Docker NDJSON: HTTP 200 can still contain an error mid-stream.
+        api_path = self.api_path("/images/create?" + urlencode({"fromImage": image}))
         connection = UnixConnection(self.sock, 900)
         try:
-            connection.request("POST", "/images/create?" + urlencode({"fromImage": image}))
+            connection.request("POST", api_path)
             response = connection.getresponse()
             if response.status != 200:
                 raise RuntimeError(f"镜像拉取失败: HTTP {response.status}")
@@ -178,31 +193,29 @@ def container_payload(old: dict, old_image: dict, target: dict) -> dict:
     payload["Labels"] = {**(config.get("Labels") or {}), **(target_config.get("Labels") or {}),
                          "com.centurylinklabs.watchtower.enable": "false"}
     host = copy.deepcopy(old.get("HostConfig") or {})
-    # Strip daemon runtime keys that conflict when starting a new replacement container in Podman/Docker
-    for bad_key in (
-        "ContainerIDFile", "VolumesFrom", "CgroupParent", "Cgroups", "SandboxKey",
-        "UTSMode", "IpcMode", "PidMode", "UsernsMode", "Devices",
-    ):
+    # Strip per-container runtime bookkeeping.
+    # Namespace, device and cgroup settings are user configuration, not noise.
+    # VolumesFrom is reconstructed from resolved mounts to avoid stale references.
+    for bad_key in ("ContainerIDFile", "VolumesFrom", "Cgroups", "SandboxKey"):
         host.pop(bad_key, None)
     host["AutoRemove"] = False
 
-    # In host network mode, port bindings or exposed ports trigger Podman 500 error
+    # Host networking must not publish bridge-network ports.
     if host.get("NetworkMode") == "host":
         host.pop("PortBindings", None)
         payload.pop("ExposedPorts", None)
         payload.pop("NetworkingConfig", None)
 
-    # Exclude system-generated mounts (/etc/resolv.conf, /etc/hosts, /etc/hostname, /dev/, /run/)
-    SYSTEM_PREFIXES = ("/etc/resolv.conf", "/etc/hosts", "/etc/hostname", "/etc/localtime", "/dev/", "/run/", "/proc/", "/sys/")
-    mounts = host.setdefault("Mounts", [])
+    # Docker inspect Mounts contains user mounts (including /run and /dev),
+    # not the automatically generated resolv.conf/hosts files. Keep them all.
+    mounts = host["Mounts"] = host.get("Mounts") or []
     destinations = {m.get("Target") for m in mounts}
-    destinations.update(b.rsplit(":", 2)[-2] if b.count(":") >= 2 else b.rsplit(":", 1)[-1]
-                        for b in host.get("Binds") or [])
+    for bind in host.get("Binds") or []:
+        parts = bind.rsplit(":", 2)
+        destinations.add(parts[-1] if parts[-1].startswith("/") else parts[-2])
     destinations.update((host.get("Tmpfs") or {}).keys())
     for mount in old.get("Mounts") or []:
         dst = mount.get("Destination") or ""
-        if any(dst == p or dst.startswith(p) for p in SYSTEM_PREFIXES):
-            continue
         if dst in destinations or mount.get("Type") == "tmpfs":
             continue
         entry = {"Type": mount["Type"], "Target": dst, "ReadOnly": not mount.get("RW", True)}
@@ -218,7 +231,7 @@ def container_payload(old: dict, old_image: dict, target: dict) -> dict:
             continue
         endpoints[name] = {key: endpoint[key] for key in ("IPAMConfig", "Aliases", "Links", "DriverOpts")
                            if endpoint.get(key)}
-    if endpoints:
+    if endpoints and host.get("NetworkMode") not in {"host", "none"}:
         payload["NetworkingConfig"] = {"EndpointsConfig": endpoints}
     return payload
 
@@ -229,12 +242,12 @@ def data_directory(role: str) -> Path:
 
 def verify_mount(old: dict, directory: Path):
     if not any(str(directory) == m["Destination"] or str(directory).startswith(m["Destination"].rstrip("/") + "/")
-               for m in old.get("Mounts", []) if m.get("RW", True)):
+               for m in old.get("Mounts") or [] if m.get("RW", True)):
         raise RuntimeError(f"{directory} 必须位于可写持久化挂载内，拒绝冒险重建")
 
 
 def helper_socket_mount(old: dict, sock: str) -> str:
-    for mount in old.get("Mounts", []):
+    for mount in old.get("Mounts") or []:
         if mount.get("Destination") == sock:
             return f"{mount['Source']}:/var/run/docker.sock"
     # Host CLI launcher may not inherit a socket from the application container.
@@ -345,8 +358,11 @@ def health_command(old: dict, role: str, version: str) -> list[str]:
         return ["frp-agent", "-healthcheck", "-expect-version", version.lstrip("v")]
     args = old.get("Config", {}).get("Cmd") or []
     port = "8080"
-    if "--port" in args:
-        port = str(args[args.index("--port") + 1])
+    for index, arg in enumerate(args):
+        if arg == "--port" and index + 1 < len(args):
+            port = str(args[index + 1])
+        elif arg.startswith("--port="):
+            port = arg.split("=", 1)[1]
     script = ("import json,urllib.request; "
               f"d=json.load(urllib.request.urlopen('http://127.0.0.1:{int(port)}/api/system/upgrade/health',timeout=3)); "
               f"assert d['ready'] and d['app_version']=={version!r}")
@@ -447,7 +463,7 @@ def run_worker(engine: Engine, path: Path, *, recover=False, expected_job_id=Non
         save_status(path, job)
         engine.request("POST", f"/containers/{job['candidate_id']}/start")
         job = save_status(path, {**job, "step": "verifying", "message": "正在校验目标版本及核心健康状态"})
-        wait_healthy(engine, job["candidate_id"], health_command(old, job["role"], job["target_version"]))
+        wait_healthy(engine, job["candidate_id"], health_command(engine.inspect(job["candidate_id"]), job["role"], job["target_version"]))
         # Commit first. A cleanup failure must not roll back a healthy new service.
         job = finish_job(path, job, "succeeded", "目标版本已通过健康检查，升级完成")
         # A cleanup error only retains the old stopped container.

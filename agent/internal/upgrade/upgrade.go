@@ -40,10 +40,9 @@ func Validate(request Request) error {
 }
 
 func SocketPath() string {
-	for _, path := range []string{"/var/run/docker.sock", "/run/podman/podman.sock"} {
-		if info, err := os.Stat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
-			return path
-		}
+	const path = "/var/run/docker.sock"
+	if info, err := os.Stat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
+		return path
 	}
 	return ""
 }

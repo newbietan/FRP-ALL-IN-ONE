@@ -6,7 +6,6 @@
     <a href="https://github.com/newbietan/FRP-ALL-IN-ONE/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/newbietan/FRP-ALL-IN-ONE?style=flat&logo=github"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/newbietan/FRP-ALL-IN-ONE?style=flat"></a>
     <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white">
-    <img alt="Podman" src="https://img.shields.io/badge/Podman-892CA0?style=flat&logo=podman&logoColor=white">
     <img alt="FRP Core" src="https://img.shields.io/badge/FRP_Core-v0.71.1-00ADD8?style=flat">
     <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white">
     <img alt="React" src="https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black">
@@ -116,7 +115,7 @@ flowchart TB
 
 ### 2. 一键极速部署（推荐）
 
-直接在服务器执行自动化部署脚本（自动识别系统、就绪 Docker/Podman 并从腾讯云镜像源秒级拉取启动）：
+直接在服务器执行自动化部署脚本（自动识别系统、就绪 Docker 并从腾讯云镜像源秒级拉取启动）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
@@ -153,6 +152,10 @@ docker compose up -d
 > **客户端接入说明**：登录 Web 控制台后，在「设备管理」页面点击「添加新设备」，系统会自动生成对应的容器一键启动命令（支持 Docker、Linux 自动安装脚本、Windows 与 macOS 引导），复制并在客户端机器执行即可完成接入。
 
 ---
+
+## 升级与回滚
+
+仅支持 Docker。服务端与客户端升级采用固定版本、配置保留、真实健康检查及失败回滚；切换时连接会短暂中断，不是零停机。旧版安装需先用宿主机命令迁移。详见 [升级说明与故障分析](docs/upgrade.md)。
 
 <a id="ports"></a>
 

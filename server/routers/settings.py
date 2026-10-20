@@ -7,15 +7,16 @@ from __future__ import annotations
 import asyncio
 import re
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from core import get_current_user, get_db
 from core.rate_limit import limiter
 import crud
-from fastapi import APIRouter, Depends, HTTPException, Request
 import models
-from pydantic import BaseModel
 from services.dns_checker import check_dns_resolution
 from services.tls_manager import tls_manager
-from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/settings", tags=["系统设置"])
 

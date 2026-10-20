@@ -93,7 +93,7 @@ async def get_agent_detail(
         "ip": system_info.get("ip") or agent.ip,
         "ips": raw_ips or [],
         "is_online": is_ws_connected,
-        "last_heartbeat": agent.last_heartbeat.isoformat() if hasattr(agent, 'last_heartbeat') and agent.last_heartbeat else None,
+        "last_heartbeat": heartbeat.isoformat() if (heartbeat := getattr(agent, "last_heartbeat", None)) else None,
         "created_at": agent.created_at.isoformat() if agent.created_at else None
     }
 

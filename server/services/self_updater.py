@@ -26,16 +26,14 @@ def status_path() -> Path:
 
 
 def get_docker_socket_path() -> str | None:
-    for value in ("/var/run/docker.sock", "/run/podman/podman.sock"):
-        if Path(value).is_socket():
-            return value
-    return None
+    value = "/var/run/docker.sock"
+    return value if Path(value).is_socket() else None
 
 
 def can_self_upgrade() -> tuple[bool, str]:
     sock = get_docker_socket_path()
     if not sock:
-        return False, "未挂载 Docker/Podman Socket，请在宿主机执行升级命令"
+        return False, "未挂载 Docker Socket，请在宿主机执行升级命令"
     try:
         if not os.access(sock, os.R_OK | os.W_OK):
             return False, "容器引擎 Socket 权限不足"
@@ -72,7 +70,7 @@ async def trigger_self_upgrade(target_version: str | None = None) -> dict:
             if release.get("error"):
                 raise ValueError("无法确认已发布版本，请稍后重试")
             target_version = release["latest_version"]
-        target_version = normalize_version(target_version)
+        target_version = normalize_version(target_version or "")
         if not models.is_newer_version(target_version, models.APP_VERSION):
             raise ValueError("目标版本必须高于当前版本")
         # Fixed per-installation resource name, not host-network HOSTNAME.
