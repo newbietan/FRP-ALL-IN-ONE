@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
-APP_VERSION = os.environ.get("APP_VERSION", "3.2.9")
+APP_VERSION = os.environ.get("APP_VERSION", "3.2.10")
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 
