@@ -57,6 +57,7 @@ import { authApi, clientsApi, tunnelsApi, frpApi, settingsApi, systemApi, agents
 import type { AgentUpgradeStatus } from './api';
 import { serverUpgradeCompleted, upgradeBusy, upgradeFailed, upgradeTimestamp } from './upgrade';
 import { dashboardWs } from './ws';
+import { formatLastSeen } from './time';
 import { MarkdownView } from './components/MarkdownView';
 import { ConfirmModal, ConfirmDialogOptions } from './components/ConfirmModal';
 
@@ -465,7 +466,7 @@ export default function App() {
       if (data.client_id) {
         setDevices(prev => prev.map(d => {
           if (d.id === data.client_id) {
-            return { ...d, status: data.is_online ? 'online' : 'offline', lastSeen: new Date().toISOString().replace('T', ' ').slice(0, 19) };
+            return { ...d, status: data.is_online ? 'online' : 'offline', lastSeen: formatLastSeen(Date.now()) };
           }
           return d;
         }));
@@ -537,7 +538,7 @@ export default function App() {
       hasUpdate,
       latestVersion,
       status: onlineStatus ? 'online' : 'offline',
-      lastSeen: client.last_seen || '-',
+      lastSeen: formatLastSeen(client.last_seen),
       tunnelsCount: client.tunnels?.length || 0,
       cpuUsage: Math.round(agent.cpu_percent || 0),
       memUsage: Math.round(agent.memory_percent || 0),

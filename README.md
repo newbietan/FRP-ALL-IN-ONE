@@ -153,6 +153,35 @@ docker compose up -d
 
 ---
 
+## 开机自启与异常重启
+
+服务端 `frp-server` 和客户端 `frp-agent` 容器均配置了 `restart: always`：进程退出后由 Docker 自动重启，Docker 随系统启动后会恢复容器。**容器重启策略不等于 Docker 自身已配置开机自启。**
+
+- **Linux 一键部署**：服务端和客户端安装脚本都会尝试启用 Docker 的 systemd/OpenRC 服务，即使 Docker 当前已运行也会配置；失败时会输出警告。手动 Compose 部署或旧安装可在对应机器执行：
+
+  ```bash
+  # systemd（如 Ubuntu / Debian）
+  sudo systemctl enable --now docker
+  systemctl is-enabled docker
+
+  # OpenRC（如 Alpine；不要与上面的 systemd 命令同时执行）
+  sudo rc-update add docker default
+  sudo rc-service docker start
+  ```
+
+- **Windows / macOS 客户端**：需在 Docker Desktop 设置中开启“登录时启动 Docker Desktop”。这通常是**用户登录后自启**，并不保证机器开机但无人登录时运行；需要无人值守开机运行时，建议使用 Linux Docker Engine。Rootless Docker、自定义运行环境需自行配置相应服务。
+- **检查已有容器**（在相应宿主机执行；服务端使用 `frp-server`，客户端使用 `frp-agent`）：
+
+  ```bash
+  docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' frp-agent
+  # 若不是 always，可修复已有容器，不会重建配置：
+  docker update --restart always frp-agent
+  ```
+
+Web 设备列表的“最后心跳时间”按浏览器本地时区显示为 `YYYY-MM-DD HH:mm:ss`；尚无心跳记录时显示 `-`。
+
+---
+
 ## 升级与回滚
 
 仅支持 Docker。服务端与客户端升级采用固定版本、配置保留、真实健康检查及失败回滚；切换时连接会短暂中断，不是零停机。旧版安装需先用宿主机命令迁移。详见 [升级说明与故障分析](docs/upgrade.md)。

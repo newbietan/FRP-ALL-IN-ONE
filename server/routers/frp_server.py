@@ -578,6 +578,7 @@ if ($CONTAINER_CLI -eq "") {{
 }}
 
 Write-Host "[OK] 检测到容器环境: $CONTAINER_CLI" -ForegroundColor Green
+Write-Host "[提示] 容器会自动重启，但需在 Docker Desktop 设置中开启登录时启动；未登录前不保证运行。" -ForegroundColor Yellow
 & $CONTAINER_CLI pull $IMAGE
 if ($LASTEXITCODE -ne 0) {{ throw "镜像拉取失败，原容器与配置未改变" }}
 $IMAGE_ID = (& $CONTAINER_CLI image inspect --format '{{{{.Id}}}}' $IMAGE)
@@ -759,7 +760,6 @@ else
 
         if command -v docker >/dev/null 2>&1; then
             CONTAINER_CLI="docker"
-            systemctl enable --now docker 2>/dev/null || true
         fi
     elif [ "{os_type}" = "darwin" ]; then
         log_error "macOS 请先启动 Docker Desktop 或通过 Homebrew 安装: brew install --cask docker"
@@ -772,15 +772,22 @@ if [ -z "$CONTAINER_CLI" ]; then
     exit 1
 fi
 
-if ! $CONTAINER_CLI info >/dev/null 2>&1; then
-    if [ "{os_type}" = "linux" ] && [ "$EUID" -eq 0 ]; then
+# Docker 当前可用不代表已设开机自启；无论是否正在运行都检查服务配置。
+if [ "{os_type}" = "linux" ]; then
+    if [ "$EUID" -eq 0 ]; then
         if command -v systemctl >/dev/null 2>&1; then
-            systemctl enable --now docker
-        elif command -v rc-service >/dev/null 2>&1; then
-            rc-update add docker default
-            rc-service docker start
+            systemctl enable --now docker || log_warn "无法启用 Docker 开机自启，请手动检查 systemctl is-enabled docker"
+        elif command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+            rc-update add docker default || log_warn "无法将 Docker 加入 OpenRC 默认启动级别"
+            rc-service docker start || log_warn "Docker 服务启动失败，请检查 rc-service docker status"
+        else
+            log_warn "未检测到 systemd/OpenRC，请手动配置 Docker 开机自启"
         fi
+    else
+        log_warn "非 root 安装未配置 Docker 服务自启，请管理员检查（Rootless Docker 需配置用户服务）"
     fi
+else
+    log_warn "请在 Docker Desktop 设置中开启登录时启动；容器仅在 Docker 运行后自动恢复，未登录前不保证运行"
 fi
 if ! $CONTAINER_CLI info >/dev/null 2>&1; then
     log_error "Docker 不可访问，请检查服务、权限或启动 Docker Desktop；原容器未改变"
