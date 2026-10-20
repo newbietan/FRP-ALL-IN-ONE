@@ -27,7 +27,10 @@ type managedService interface {
 	StatusExporter() client.StatusExporter
 }
 
-const defaultStopTimeout = 15 * time.Second
+const (
+	defaultStopTimeout  = 15 * time.Second
+	defaultReadyTimeout = 45 * time.Second // includes FRP's 30s proxy-registration retry
+)
 
 // Manager 内置 FRP 客户端服务管理器
 type Manager struct {
@@ -42,10 +45,12 @@ type Manager struct {
 	operationMu sync.Mutex // serializes complete start/stop/reload transactions
 	proxyNames  []string
 
-	newService  func(client.ServiceOptions) (managedService, error)
-	stopTimeout time.Duration
-	isRunning   bool
-	OnStatus    func(status string)
+	newService   func(client.ServiceOptions) (managedService, error)
+	stopTimeout  time.Duration
+	readyTimeout time.Duration
+	lastRunErr   error
+	isRunning    bool
+	OnStatus     func(status string)
 }
 
 // NewManager 创建新的内置 FRP 管理器（无需外部 frpc 可执行文件路径）
@@ -54,6 +59,7 @@ func NewManager(configPath string, logCollector *logger.Collector) *Manager {
 		configPath:   configPath,
 		logCollector: logCollector,
 		stopTimeout:  defaultStopTimeout,
+		readyTimeout: defaultReadyTimeout,
 		newService: func(options client.ServiceOptions) (managedService, error) {
 			return client.NewService(options)
 		},
@@ -101,6 +107,11 @@ func (m *Manager) startLocked() error {
 	if err := completeAndValidateConfig(result); err != nil {
 		return fmt.Errorf("校验配置失败: %w", err)
 	}
+	// The Agent, unlike the standalone frpc CLI, is a persistent supervisor.
+	// A failed first login after reload must retry, not leave an online Agent
+	// with a permanently stopped core. This also protects older saved configs.
+	loginFailExit := false
+	result.Common.LoginFailExit = &loginFailExit
 
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(result.Proxies, result.Visitors); err != nil {
@@ -134,6 +145,7 @@ func (m *Manager) startLocked() error {
 	}
 
 	m.service = svr
+	m.lastRunErr = nil
 	done := make(chan struct{})
 	m.done = done
 	m.proxyNames = nil
@@ -145,14 +157,16 @@ func (m *Manager) startLocked() error {
 	log.Println("[FRP-Core] 内置穿透引擎已启动")
 
 	go func() {
-		if err := svr.Run(ctx); err != nil {
-			log.Printf("[FRP-Core] 运行终止: %v", err)
+		runErr := svr.Run(ctx)
+		if runErr != nil {
+			log.Printf("[FRP-Core] 运行终止: %v", runErr)
 		}
 		cancel()
 		m.mu.Lock()
 		current := m.done == done
 		if current {
 			m.isRunning = false
+			m.lastRunErr = runErr
 		}
 		m.mu.Unlock()
 		if current && m.OnStatus != nil {
@@ -229,10 +243,48 @@ func (m *Manager) restartLocked() error {
 	return m.startLocked()
 }
 
-// UpdateConfig 更新配置并热重载
+// UpdateConfig validates/persists config and starts the replacement core.
+// Its return value alone does not acknowledge asynchronous login/registration.
 func (m *Manager) UpdateConfig(newConfig string) error {
 	m.operationMu.Lock()
 	defer m.operationMu.Unlock()
+	return m.updateConfigLocked(newConfig)
+}
+
+// ApplyConfig is the management-command path: acknowledge success only after
+// FRPS authentication and every enabled proxy's registration have completed.
+func (m *Manager) ApplyConfig(newConfig string) error {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	if err := m.updateConfigLocked(newConfig); err != nil {
+		return err
+	}
+	timer := time.NewTimer(m.readyTimeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err := m.readinessError()
+		if err == nil {
+			return nil
+		}
+		if !m.IsRunning() {
+			return fmt.Errorf("配置已保存，但内核未就绪: %w", err)
+		}
+		select {
+		case <-timer.C:
+			// Keep the desired config and reconnect/registration retries alive;
+			// do not silently restore a disabled tunnel after a transient outage.
+			if err := m.readinessError(); err != nil {
+				return fmt.Errorf("配置已保存，但等待隧道就绪超时（内核继续重试）: %w", err)
+			}
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *Manager) updateConfigLocked(newConfig string) error {
 	previous, readErr := os.ReadFile(m.configPath)
 	if readErr == nil && bytes.Equal(previous, []byte(newConfig)) && m.IsRunning() {
 		return nil // normal reconnects must not interrupt working tunnels
@@ -273,18 +325,31 @@ func (m *Manager) UpdateConfig(newConfig string) error {
 
 // Healthy requires a live authenticated control connection and registered proxies.
 func (m *Manager) Healthy() bool {
+	return m.readinessError() == nil
+}
+
+func (m *Manager) readinessError() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.isRunning || m.service == nil || !m.service.IsConnected() {
-		return false
+	if !m.isRunning || m.service == nil {
+		if m.lastRunErr != nil {
+			return fmt.Errorf("FRP 内核已退出: %w", m.lastRunErr)
+		}
+		return fmt.Errorf("FRP 内核未运行")
+	}
+	if !m.service.IsConnected() {
+		return fmt.Errorf("尚未建立 FRPS 认证连接，请检查内核连接/认证日志")
 	}
 	for _, name := range m.proxyNames {
 		status, ok := m.service.StatusExporter().GetProxyStatus(name)
-		if !ok || status == nil || status.Phase != proxy.ProxyPhaseRunning || status.Err != "" {
-			return false
+		if !ok || status == nil {
+			return fmt.Errorf("隧道 [%s] 尚未注册", name)
+		}
+		if status.Phase != proxy.ProxyPhaseRunning || status.Err != "" {
+			return fmt.Errorf("隧道 [%s] 未就绪，状态=%s，原因=%s", name, status.Phase, status.Err)
 		}
 	}
-	return true
+	return nil
 }
 
 // IsRunning 检查内置引擎是否在运行

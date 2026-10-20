@@ -11,9 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/fatedier/frp/client"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	frpserver "github.com/fatedier/frp/server"
 )
@@ -40,6 +43,35 @@ func waitForCoreReady(t *testing.T, manager *Manager) {
 // Admin listener, and forwarded TCP traffic. All endpoints are test-owned loopback
 // ports; neither SSH software nor Docker is required.
 func TestAddDefaultTunnelAfterAuthenticatedStartup(t *testing.T) {
+	testTunnelReloadForwarding(t, reloadScenario{})
+}
+
+func TestDisableAndReenableTunnelForwarding(t *testing.T) {
+	testTunnelReloadForwarding(t, reloadScenario{toggleCycles: 5})
+}
+
+func TestReenableRecoversFromTransientLoginFailure(t *testing.T) {
+	testTunnelReloadForwarding(t, reloadScenario{toggleCycles: 1, failFirstReenable: true})
+}
+
+func TestApplyConfigReportsProxyRegistrationFailure(t *testing.T) {
+	testTunnelReloadForwarding(t, reloadScenario{rejectRemotePort: true})
+}
+
+type reloadScenario struct {
+	toggleCycles      int
+	failFirstReenable bool
+	rejectRemotePort  bool
+}
+
+type failedLoginConnector struct{ client.Connector }
+
+func (failedLoginConnector) Open() error {
+	return fmt.Errorf("fixture: transient FRPS connection failure")
+}
+
+func testTunnelReloadForwarding(t *testing.T, scenario reloadScenario) {
+	t.Helper()
 	token := rand.Text()
 	cfg := &v1.ServerConfig{
 		BindAddr:      "127.0.0.1",
@@ -101,7 +133,24 @@ func TestAddDefaultTunnelAfterAuthenticatedStartup(t *testing.T) {
 	remotePort := availableAdminPort(t)
 	// No bandwidth settings: this is the ordinary panel-generated SSH/TCP case.
 	updated := initial + fmt.Sprintf("[[proxies]]\nname = \"ubuntu.SSH\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = %s\nremotePort = %d\n", localPort, remotePort)
-	if err := manager.UpdateConfig(updated); err != nil {
+	if scenario.rejectRemotePort {
+		blocker, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = blocker.Close() })
+		manager.readyTimeout = 500 * time.Millisecond
+		err = manager.ApplyConfig(updated)
+		if err == nil || !strings.Contains(err.Error(), "ubuntu.SSH") || !strings.Contains(err.Error(), "start error") {
+			t.Fatalf("proxy registration failure was reported as success or lacked detail: %v", err)
+		}
+		if !manager.IsRunning() || manager.Healthy() {
+			t.Fatal("unregistered proxy was marked healthy, or retrying core was stopped")
+		}
+		assertConfig(t, manager, updated)
+		return
+	}
+	if err := manager.ApplyConfig(updated); err != nil {
 		t.Fatalf("valid new tunnel failed to reload: %v", err)
 	}
 	waitForCoreReady(t, manager)
@@ -109,13 +158,49 @@ func TestAddDefaultTunnelAfterAuthenticatedStartup(t *testing.T) {
 	transport := &http.Transport{DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	httpClient := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	response, err := httpClient.Get("http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort)))
-	if err != nil {
-		t.Fatalf("registered tunnel did not forward traffic: %v", err)
+	remoteAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(remotePort))
+	assertForwarding := func() {
+		t.Helper()
+		response, err := httpClient.Get("http://" + remoteAddr)
+		if err != nil {
+			t.Fatalf("registered tunnel did not forward traffic: %v", err)
+		}
+		body, err := io.ReadAll(response.Body)
+		closeErr := response.Body.Close()
+		if err != nil || closeErr != nil || response.StatusCode != http.StatusOK || string(body) != responseText {
+			t.Fatalf("unexpected forwarded response: status=%d body=%q read=%v close=%v", response.StatusCode, body, err, closeErr)
+		}
 	}
-	body, err := io.ReadAll(response.Body)
-	closeErr := response.Body.Close()
-	if err != nil || closeErr != nil || response.StatusCode != http.StatusOK || string(body) != responseText {
-		t.Fatalf("unexpected forwarded response: status=%d body=%q read=%v close=%v", response.StatusCode, body, err, closeErr)
+	assertForwarding()
+	for cycle := 0; cycle < scenario.toggleCycles; cycle++ {
+		t.Logf("disable/re-enable cycle %d", cycle+1)
+		if err := manager.ApplyConfig(initial); err != nil {
+			t.Fatalf("disable failed: %v", err)
+		}
+		waitForCoreReady(t, manager)
+		if conn, err := net.DialTimeout("tcp", remoteAddr, time.Second); err == nil {
+			conn.Close()
+			t.Fatal("disabled tunnel still accepts connections")
+		}
+		if scenario.failFirstReenable {
+			// Fail only the first real FRPS dial of the replacement core. The
+			// management connection is independent and would remain online.
+			var failed atomic.Bool
+			manager.newService = func(options client.ServiceOptions) (managedService, error) {
+				options.ConnectorCreator = func(ctx context.Context, common *v1.ClientCommonConfig) client.Connector {
+					connector := client.NewConnector(ctx, common)
+					if failed.CompareAndSwap(false, true) {
+						return failedLoginConnector{connector}
+					}
+					return connector
+				}
+				return client.NewService(options)
+			}
+		}
+		if err := manager.ApplyConfig(updated); err != nil {
+			t.Fatalf("re-enable failed: %v", err)
+		}
+		waitForCoreReady(t, manager)
+		assertForwarding()
 	}
 }
