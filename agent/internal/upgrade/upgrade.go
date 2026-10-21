@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/frp-manager/agent/internal/reaper"
 )
 
 const RuntimePath = "/usr/local/lib/frp/container_upgrade.py"
@@ -104,7 +106,10 @@ func (r *Runner) Handle(data interface{}) {
 			"--job-id", request.JobID, "--client-id", r.ClientID,
 			"--socket", SocketPath(), "--status", r.statusPath())
 		command.Env = append(os.Environ(), "FRP_UPGRADE_DATA_DIR="+r.Directory)
-		if err := command.Run(); err != nil {
+		reaper.Pause()
+		runErr := command.Run()
+		reaper.Resume()
+		if runErr != nil {
 			if !r.Report(request.JobID) {
 				r.emit(request, "failed", "升级准备失败，旧容器未切换；请检查任务锁与容器引擎")
 			}

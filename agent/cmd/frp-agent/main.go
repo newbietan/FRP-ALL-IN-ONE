@@ -29,12 +29,13 @@ import (
 	"github.com/frp-manager/agent/internal/frpc"
 	"github.com/frp-manager/agent/internal/logger"
 	"github.com/frp-manager/agent/internal/monitor"
+	"github.com/frp-manager/agent/internal/reaper"
 	"github.com/frp-manager/agent/internal/upgrade"
 	"github.com/frp-manager/agent/internal/ws"
 )
 
 var (
-	version   = "3.2.13"
+	version   = "3.2.14"
 	buildTime = "unknown"
 )
 
@@ -98,6 +99,9 @@ func main() {
 	log.Printf("FRP Manager Agent v%s 启动中...", version)
 	log.Printf("Server: %s", *serverURL)
 	log.Printf("Client ID: %s", *clientID)
+
+	// 若当前以 PID 1 运行，启动僵尸进程自动回收器
+	reaper.Start()
 
 	// 创建配置
 	cfg := &config.Config{
@@ -206,5 +210,6 @@ func main() {
 		log.Printf("警告: FRPC 停止失败: %v", err)
 	}
 	wsClient.Close()
+	logCollector.Stop()
 	log.Println("Agent 已退出")
 }

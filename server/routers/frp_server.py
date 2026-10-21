@@ -633,6 +633,7 @@ New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Ou
 
 & $CONTAINER_CLI run -d `
   --name frp-agent `
+  --init `
   --network host `
   --restart always `
   --label io.frp-all-in-one.role=agent `
@@ -873,6 +874,7 @@ fi
 
 $CONTAINER_CLI run -d \\
   --name frp-agent \\
+  --init \\
   --network host \\
   --restart always \\
   --label io.frp-all-in-one.role=agent \\
