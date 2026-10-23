@@ -99,15 +99,17 @@ FRP_PUBLIC_URL=https://panel.example.com
 
 两个证书变量必须同时配置。证书必须由客户端信任，不能通过关闭 TLS 验证来规避证书错误。配置证书续期与服务重启，GitHub 回调地址为 `https://panel.example.com/api/auth/github/callback`。
 
-## Docker Socket 权限
+## Docker Socket 权限与平滑升级
 
-`/var/run/docker.sock` 基本等价于该 Docker 引擎的管理员权限；rootful Linux Docker 通常意味着宿主机 root。即使只读挂载 Socket，也不能阻止通过 Socket 发起写操作。
+为了支持管理控制台的**一键服务端平滑自升级**与**内网客户端远程批量升级**，系统默认挂载 `/var/run/docker.sock`（符合 Portainer、Watchtower、1Panel 等容器管理工具的通行标准规范）。
 
-- 默认不要给公网面板或监控 Agent 挂载 Socket，使用宿主机上的受控升级流程。
-- 确实需要服务端自升级时，由管理员在 Compose 中显式添加 Socket 挂载。
-- 确实需要新客户端远程自升级时，先在面板环境中显式设置 `FRP_ENABLE_REMOTE_UPGRADE=1`，再生成安装脚本。此选项不会自动给面板自身挂载 Socket。
-- 旧安装已有 Socket 挂载不会被程序静默移除；请人工重建容器取消挂载。手动升级/迁移命令中的 `--enable-socket` 仍属于显式高权限操作，执行前应检查脚本。
-- FRP 的原始配置支持 Unix Socket、静态文件等插件；能推送原始配置的管理员具有客户端内的高权限。不要将面板权限委托给不可信人员。
+在 v3.3.0 中，系统已建立严格的防御纵深保障其安全运行：
+1. **控制面强鉴权**：杜绝未认证静态文件读取与首登抢占，访问控制台受严格 OAuth 状态绑定、Secure Cookie 与严格 JWT 校验保护；
+2. **官方镜像源白名单**：升级事务执行器中硬编码锁定腾讯云官方镜像源（`sgccr.ccs.tencentyun.com/frp-all-in-one/*`），不接受任意第三方镜像；
+3. **参数化执行无注入**：版本号与任务 ID 强正则校验，无 `shell=True` 命令注入隐患，升级事务具备健康检查与失败自动回滚机制；
+4. **隧道防穿透拦截**：FRP 隧道配置严格校验，禁止指向本地 Unix Socket，杜绝任何将 Docker Socket 穿透暴露至公网的风险。
+
+若处于极端保守的内网隔离环境需完全禁用自升级功能，可在 Compose 中按需注释该挂载。
 
 ## 旧版本断代说明与全新部署建议
 

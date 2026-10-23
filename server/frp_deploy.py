@@ -44,21 +44,20 @@ DEFAULT_FRP_VERSION = "0.71.1"
 
 
 async def get_latest_frp_version() -> str:
-    """从 GitHub API 获取 FRP 最新发布版本号"""
+    """从 GitHub API 获取 FRP 最新发布版本号（超时或失败时立即回退至内置内核版本）"""
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(
                 "https://api.github.com/repos/fatedier/frp/releases/latest",
                 headers={"Accept": "application/vnd.github.v3+json"}
             )
             if response.status_code == 200:
                 tag_name: str = response.json().get("tag_name", "")
-                # tag_name 格式为 "v0.61.1"，去掉 "v" 前缀
                 if tag_name.startswith("v"):
                     return tag_name[1:]
                 return tag_name
     except Exception as e:
-        print(f"获取 FRP 最新版本失败: {e}")
+        logger.debug("获取 FRP 最新版本失败，使用默认版本: %s", e)
     return DEFAULT_FRP_VERSION
 
 

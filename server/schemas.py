@@ -37,6 +37,8 @@ class TunnelBase(BaseModel):
         # 允许 IPv4、IPv6、localhost 等合法地址，禁止换行和引号等 TOML 注入字符
         if any(c in v for c in '"\n\r\t[]{}'):
             raise ValueError("local_ip 包含非法字符")
+        if "docker.sock" in v.lower() or "/" in v:
+            raise ValueError("local_ip 仅支持网络 IP 或主机名，禁止指向 Unix Socket")
         if len(v) > 256:
             raise ValueError("local_ip 长度过长")
         return v

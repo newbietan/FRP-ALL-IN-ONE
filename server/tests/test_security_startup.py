@@ -45,10 +45,10 @@ def test_partial_tls_configuration_fails_before_starting_python(tmp_path, variab
     assert "must be configured together" in result.stderr
 
 
-def test_default_compose_does_not_mount_engine_socket():
+def test_compose_configures_engine_socket_and_entrypoint():
     compose = (ROOT / "deploy/compose.yml").read_text()
     active_lines = [line.strip() for line in compose.splitlines() if not line.lstrip().startswith("#")]
-    assert not any("docker.sock" in line for line in active_lines)
+    assert any("docker.sock:/var/run/docker.sock" in line for line in active_lines)
     assert 'CMD ["bash", "/app/run.sh"]' in (ROOT / "server/Dockerfile").read_text()
     assert "--require-hashes -r requirements.lock" in (ROOT / "server/Dockerfile").read_text()
 

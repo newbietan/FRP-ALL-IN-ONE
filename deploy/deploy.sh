@@ -267,7 +267,7 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
-      # Host-side upgrades are the safe default; no Docker Socket in the panel.
+      - /var/run/docker.sock:/var/run/docker.sock
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
 COMPOSE_EOF
@@ -501,14 +501,20 @@ configure_env_vars() {
         echo -e "${GREEN}[OK] 沿用现有 SECRET_KEY（保持登录态与会话有效）${NC}"
     fi
 
+    # 默认开启控制台一键平滑自升级与远程客户端升级功能
+    FRP_ENABLE_REMOTE_UPGRADE="1"
+    _save_to_system_env "FRP_ENABLE_REMOTE_UPGRADE" "1"
+
     # 写入项目 .env 文件（供 docker compose 使用）
     cat > "$ENV_FILE" <<ENVEOF
 PORT=${PORT:-443}
+PUBLIC_IP=${PUBLIC_IP}
 GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
 GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
 FRP_PUBLIC_URL=${FRP_PUBLIC_URL}
 FRP_AUTO_SELF_SIGNED_TLS=${FRP_AUTO_SELF_SIGNED_TLS:-0}
 FRP_LISTEN_HOST=${FRP_LISTEN_HOST:-}
+FRP_ENABLE_REMOTE_UPGRADE=1
 SECRET_KEY=${SECRET_KEY}
 INITIAL_ADMIN_GITHUB_ID=${INITIAL_ADMIN_GITHUB_ID:-}
 INITIAL_ADMIN_GITHUB_USERNAME=${INITIAL_ADMIN_GITHUB_USERNAME:-}
@@ -517,11 +523,13 @@ ENVEOF
 
     # 导出到当前 shell（供 docker compose 使用）
     export PORT
+    export PUBLIC_IP
     export GITHUB_CLIENT_ID
     export GITHUB_CLIENT_SECRET
     export FRP_PUBLIC_URL
     export FRP_AUTO_SELF_SIGNED_TLS
     export FRP_LISTEN_HOST
+    export FRP_ENABLE_REMOTE_UPGRADE
     export SECRET_KEY
     export INITIAL_ADMIN_GITHUB_ID
     export INITIAL_ADMIN_GITHUB_USERNAME

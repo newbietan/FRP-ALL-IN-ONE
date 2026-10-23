@@ -6,6 +6,7 @@ FRP Manager API - 主入口
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import json as _json
 import os
@@ -97,6 +98,9 @@ def init_database():
     _auto_migrate_db(engine)
     print("[OK] 数据库初始化完成。首个 GitHub 登录的用户将自动成为管理员。")
 
+    # 首次启动自适应初始化：如果数据库尚未初始化，根据环境变量或公网 IP 自动生成基础配置并就绪，免除前端二次向导
+    asyncio.create_task(_auto_init_frps_if_needed())
+
     # 单容器架构：自动启动内置 FRPS 穿透核心
     try:
         from core.container_engine import restart_frps_service
@@ -123,6 +127,48 @@ def shutdown_services():
         print("[OK] FRPS 服务已安全停止。")
     except Exception as e:
         print(f"[WARN] 停止 FRPS 异常: {e}")
+
+
+async def _auto_init_frps_if_needed():
+    """
+    首次启动自适应初始化：如果系统尚未初始化，根据环境变量或公网 IP 自动生成基础配置并就绪，
+    直接使系统进入可用状态，彻底免除用户登录 Web 控制台时面对繁琐、重复的二次模式选择向导。
+    """
+    db = SessionLocal()
+    try:
+        if crud.get_config(db, models.ConfigKeys.IS_INITIALIZED) == "true":
+            return
+
+        import frp_deploy
+
+        public_ip = os.environ.get("PUBLIC_IP") or os.environ.get("FRP_SERVER_IP")
+        if not public_ip:
+            from urllib.parse import urlsplit
+
+            public_url = os.environ.get("FRP_PUBLIC_URL", "")
+            if public_url:
+                with contextlib.suppress(Exception):
+                    parsed_host = urlsplit(public_url).hostname
+                    if parsed_host:
+                        public_ip = parsed_host
+        if not public_ip:
+            with contextlib.suppress(Exception):
+                public_ip = await frp_deploy.get_public_ip()
+
+        res = await frp_deploy.generate_frps_config(port=7000, auth_token=None, server_ip=public_ip or "127.0.0.1")
+        if res.get("success"):
+            info = res.get("info", {})
+            crud.set_config(db, models.ConfigKeys.FRPS_VERSION, info.get("version", models.APP_VERSION))
+            crud.set_config(db, models.ConfigKeys.FRPS_PORT, str(info.get("port", 7000)))
+            crud.set_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN, info.get("auth_token", ""))
+            crud.set_config(db, models.ConfigKeys.SERVER_PUBLIC_IP, info.get("public_ip", public_ip or "127.0.0.1"))
+            crud.set_config(db, models.ConfigKeys.FRPS_DASHBOARD_PWD, info.get("dashboard_pwd", ""))
+            crud.set_config(db, models.ConfigKeys.IS_INITIALIZED, "true")
+            print("[OK] FRPS 服务端核心已自适应就绪，用户登录后将直接进入仪表盘。")
+    except Exception as e:
+        print(f"[WARN] FRPS 自适应初始化异常: {e}")
+    finally:
+        db.close()
 
 
 async def background_ping_task():
