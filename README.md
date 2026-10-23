@@ -115,7 +115,7 @@ flowchart TB
 
 ---
 
-### 2. 一键极速部署（推荐）
+### 2. 一键极速部署
 
 直接在服务器执行自动化部署脚本（自动识别系统、就绪 Docker 并从腾讯云镜像源秒级拉取启动）：
 
@@ -123,38 +123,9 @@ flowchart TB
 curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
 ```
 
-脚本将引导填写 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET` 以及**初始管理员 GitHub 用户名**（开启防抢占防护）。
+脚本将引导完成管理员信息配置，并自动签发 IP SAN 自签名证书或配置域名 HTTPS。
 
----
-
-### 3. 或者通过标准 Docker Compose 部署
-
-若习惯手动管理 Compose 配置：
-
-```bash
-mkdir -p frp-manager && cd frp-manager
-
-# 下载标准化 compose 编排文件
-curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
-
-# 创建环境变量配置文件
-cat > .env <<EOF
-GITHUB_CLIENT_ID=你的ClientID
-GITHUB_CLIENT_SECRET=你的ClientSecret
-# 纯 IP 自签模式填 https://<你的服务器公网IP>；已备案域名填 https://<你的域名>
-FRP_PUBLIC_URL=https://<你的服务器公网IP或域名>
-FRP_AUTO_SELF_SIGNED_TLS=1
-FRP_LISTEN_HOST=0.0.0.0
-SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
-INITIAL_ADMIN_GITHUB_ID=你的GitHub数字ID
-EOF
-chmod 600 .env
-
-# 一键拉取并启动服务
-docker compose up -d
-```
-
-默认使用 443 端口原生 TLS / HTTPS。纯 IP 模式下服务启动时会自动签发 IP SAN 自签名证书，打开浏览器直接访问 `https://<你的公网IP>` 即可开始使用（首次打开提示证书警告时点击“高级” -> “继续前往”）。详见 [安全部署指南](docs/security.md)。
+部署完成后，打开浏览器直接访问 `https://<你的服务器公网IP或域名>` 即可开始使用（默认使用 443 端口原生 TLS / HTTPS；若使用纯 IP 自签名模式，首次打开提示证书警告时点击“高级” ➔ “继续前往”即可进入控制台）。详见 [安全部署指南](docs/security.md)。
 
 > **客户端接入说明**：登录 Web 控制台后，在「设备管理」页面点击「添加新设备」，系统会自动生成对应的容器一键启动命令（支持 Docker、Linux 自动安装脚本、Windows 与 macOS 引导），复制并在客户端机器执行即可完成接入。
 

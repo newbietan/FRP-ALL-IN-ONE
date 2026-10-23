@@ -115,7 +115,7 @@ This platform uses GitHub OAuth for authentication. Create your OAuth App first:
 
 ---
 
-### 2. One-Line Deployment (Recommended)
+### 2. One-Line Deployment
 
 Run the automated deployment script on your Linux server:
 
@@ -123,38 +123,9 @@ Run the automated deployment script on your Linux server:
 curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/deploy.sh | sudo bash
 ```
 
-The script will prompt for your `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and optional `INITIAL_ADMIN_GITHUB_USERNAME` for anti-hijack protection.
+The script will guide you through administrator authentication configuration and auto-generate an IP SAN self-signed TLS certificate or configure domain HTTPS.
 
----
-
-### 3. Or via Standard Docker Compose
-
-If you prefer manual compose management:
-
-```bash
-mkdir -p frp-manager && cd frp-manager
-
-# Download standard compose file
-curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/compose.yml -o compose.yml
-
-# Create environment configuration
-cat > .env <<EOF
-GITHUB_CLIENT_ID=your_client_id
-GITHUB_CLIENT_SECRET=your_client_secret
-# Direct IP mode: https://<YOUR_PUBLIC_IP>; Domain mode: https://<YOUR_DOMAIN>
-FRP_PUBLIC_URL=https://<YOUR_SERVER_IP_OR_DOMAIN>
-FRP_AUTO_SELF_SIGNED_TLS=1
-FRP_LISTEN_HOST=0.0.0.0
-SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
-INITIAL_ADMIN_GITHUB_ID=your_github_numeric_id
-EOF
-chmod 600 .env
-
-# Pull and start services
-docker compose up -d
-```
-
-The Web Console defaults to port 443 with native TLS. Open `https://<YOUR_SERVER_IP>` in your browser (if using self-signed IP certificate, accept the browser warning on first visit via Advanced -> Proceed). See [Security Guide](docs/security.md).
+Once deployed, open `https://<YOUR_SERVER_IP_OR_DOMAIN>` directly in your browser (defaults to port 443 with native TLS; if using self-signed IP mode, accept the certificate warning on first visit via Advanced ➔ Proceed). See [Security Guide](docs/security.md).
 
 > **Client Device Onboarding**: Once the server is running, log into the Web Console, go to **Devices** → click **Add Device**, and copy the auto-generated one-click container command or setup script to your edge device.
 
