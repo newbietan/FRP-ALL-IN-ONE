@@ -342,7 +342,7 @@ show_info() {
     if [ "${FRP_AUTO_SELF_SIGNED_TLS:-0}" = "1" ]; then
         echo -e "   ${YELLOW}[证书说明] 当前采用 IP 自签名证书模式。首次打开浏览器如提示“证书不受信任/安全警告”，请点击“高级” -> “继续前往”，传输全程受 TLS 1.3 强加密保护，国内免域名、免备案且不会被机房阻断。${NC}"
     else
-        echo "   后端如监听 127.0.0.1:8080；请按 docs/security.md 配置宿主机 HTTPS 代理。"
+        echo "   后端如监听 127.0.0.1:443；请按 docs/security.md 配置宿主机 HTTPS 代理。"
     fi
     echo "   FRP 穿透端口: ${PUBLIC_IP}:7000"
     echo ""

@@ -5,7 +5,7 @@ TLS 证书管理服务
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import logging
 import os
 from pathlib import Path
@@ -71,9 +71,9 @@ class TLSManager:
                         with contextlib.suppress(Exception):
                             expiry = datetime.strptime(expiry_str, "%b %d %H:%M:%S %Y %Z")
                             # openssl 输出的时间总是 GMT，强制设为 UTC 避免 naive/aware 混用
-                            expiry_utc = expiry.replace(tzinfo=timezone.utc)
+                            expiry_utc = expiry.replace(tzinfo=UTC)
                             info["expires_at"] = expiry_utc.isoformat()
-                            info["days_until_expiry"] = (expiry_utc - datetime.now(timezone.utc)).days
+                            info["days_until_expiry"] = (expiry_utc - datetime.now(UTC)).days
                     if "subject=" in line:
                         info["subject"] = line
                 return info
@@ -99,7 +99,7 @@ class TLSManager:
                 "--issue",
                 "-d", domain,
                 "--standalone",
-                "--httpport", "9080",  # 使用 9080 端口避免与前端 Nginx (8080) 冲突
+                "--httpport", "9080",  # 使用 9080 端口避免与管理服务端口冲突
                 "--certhome", str(AUTO_CERTS_DIR),
                 "--force"
             ]

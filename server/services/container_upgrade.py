@@ -364,15 +364,38 @@ def health_command(old: dict, role: str, version: str) -> list[str]:
     if role == "agent":
         return ["frp-agent", "-healthcheck", "-expect-version", version.lstrip("v")]
     args = old.get("Config", {}).get("Cmd") or []
-    port = "8080"
+    ports = []
     for index, arg in enumerate(args):
         if arg == "--port" and index + 1 < len(args):
-            port = str(args[index + 1])
+            ports.append(str(args[index + 1]))
         elif arg.startswith("--port="):
-            port = arg.split("=", 1)[1]
-    script = ("import json,urllib.request; "
-              f"d=json.load(urllib.request.urlopen('http://127.0.0.1:{int(port)}/api/system/upgrade/health',timeout=3)); "
-              f"assert d['ready'] and d['app_version']=={version!r}")
+            ports.append(arg.split("=", 1)[1])
+    for item in old.get("Config", {}).get("Env", []):
+        if item.startswith("PORT="):
+            ports.append(item.split("=", 1)[1])
+    ports.append("443")
+    target_ports = []
+    for p in ports:
+        with contextlib.suppress(ValueError):
+            val = int(p)
+            if val not in target_ports:
+                target_ports.append(val)
+    if not target_ports:
+        target_ports = [443]
+    script = (
+        "import json,urllib.request,ssl\n"
+        "ctx = ssl._create_unverified_context()\n"
+        "d = None\n"
+        f"for p in {target_ports!r}:\n"
+        "    for scheme in ['https', 'http']:\n"
+        "        try:\n"
+        "            req = urllib.request.urlopen(f'{scheme}://127.0.0.1:{p}/api/system/upgrade/health', timeout=3, context=ctx)\n"
+        "            d = json.load(req)\n"
+        f"            if d and d.get('ready') and d.get('app_version') == {version!r}: break\n"
+        "        except Exception: pass\n"
+        f"    if d and d.get('ready') and d.get('app_version') == {version!r}: break\n"
+        f"assert d and d['ready'] and d['app_version'] == {version!r}\n"
+    )
     return ["python3", "-c", script]
 
 

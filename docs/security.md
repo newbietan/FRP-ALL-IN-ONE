@@ -41,7 +41,7 @@ INITIAL_ADMIN_GITHUB_ID=你的GitHub数字ID
 
 ## 推荐（已备案独立服务器）：宿主机 HTTPS 反向代理
 
-默认 Compose 使用 host 网络，因此宿主机代理可以访问 `127.0.0.1:8080`。在 `.env` 中设置：
+默认 Compose 使用 host 网络，因此宿主机代理可以访问 `127.0.0.1:443`。在 `.env` 中设置：
 
 ```dotenv
 FRP_PUBLIC_URL=https://panel.example.com
@@ -68,7 +68,8 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass https://127.0.0.1:443;
+        proxy_ssl_verify off;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -81,7 +82,7 @@ server {
 }
 ```
 
-仅开放管理入口 443，以及实际需要的 FRPS/隧道端口；8080、7500 不应公网开放。代理必须由可信主体管理。不要将 `FRP_TRUSTED_PROXY_IPS` 设置为 `*`。默认仅信任 `127.0.0.1,::1`；独立代理容器应使用受控网络并配置精确的代理地址。
+仅开放管理入口 443，以及实际需要的 FRPS/隧道端口；7500 等内部端口不应公网开放。代理必须由可信主体管理。不要将 `FRP_TRUSTED_PROXY_IPS` 设置为 `*`。默认仅信任 `127.0.0.1,::1`；独立代理容器应使用受控网络并配置精确的代理地址。
 
 仓库原有 TLS 管理器保留了旧分离容器部署路径，**不应依赖它为当前默认单容器架构自动配置 HTTPS**；推荐按上述方式在面板之外配置代理与证书。
 
@@ -108,16 +109,23 @@ FRP_PUBLIC_URL=https://panel.example.com
 - 旧安装已有 Socket 挂载不会被程序静默移除；请人工重建容器取消挂载。手动升级/迁移命令中的 `--enable-socket` 仍属于显式高权限操作，执行前应检查脚本。
 - FRP 的原始配置支持 Unix Socket、静态文件等插件；能推送原始配置的管理员具有客户端内的高权限。不要将面板权限委托给不可信人员。
 
-## 旧版本迁移与泄露响应
+## 旧版本断代说明与全新部署建议
 
-若旧版本曾公网可达，应当按“密钥可能已经泄露”处理，而不仅是更新代码：
+> **重要升级决策**：**v3.3.0 彻底废弃 8080 端口，且不再提供针对旧版本的就地平滑升级兜底**。<br>
+> 鉴于 `< v3.3.0` 历史版本存在严重安全缺陷（未认证文件读取与管理员身份伪造），**就地升级无法根除历史凭据失窃隐患**。我们强烈要求所有旧版本用户放弃就地升级，采取**手动移除旧容器与旧凭据、全新部署 v3.3.0** 的方式完成升级：
 
-1. 限制访问，备份数据，在可信环境审查日志、管理员 GitHub ID、客户端、隧道和升级记录。
-2. 部署修复版并配置可信 HTTPS/WSS；更新 GitHub OAuth 回调和 `FRP_PUBLIC_URL`。
-3. 更换 `.env` 中的 `SECRET_KEY`（或删除/替换持久化的 `.jwt_secret` 后重启）以使旧会话失效；同步更换 GitHub OAuth Client Secret。
-4. 重置安装密钥，并轮换各设备 `auth_token`、FRPS token、Dashboard 密码。**轮换设备凭据需要同步更新客户端并重连，不能只改数据库后继续使用旧凭据。**
-5. 重建旧客户端，将管理地址从 `ws://` 改为 `wss://`，移除不需要的 Socket 挂载；必要时重装受影响宿主机。
-6. 删除或安全处理包含 Token 的旧访问日志、浏览器历史、下载的安装脚本及备份。
+1. **备份必要业务数据**：记录原各客户端中的隧道映射端口和参数，其他由旧版本生成的 `.jwt_secret`、旧 Token 一律废弃。
+2. **彻底移除旧容器与旧数据卷**：
+   ```bash
+   # 停止并清理旧容器
+   docker rm -f frp-server frp-agent 2>/dev/null || true
+   # 清理旧数据卷中的敏感残留凭据
+   rm -rf ./data /app/data /opt/frp
+   ```
+3. **按全新流程部署 v3.3.0**：
+   直接使用一键脚本或 Compose 部署，启用默认的 443 端口自签 IP TLS 或正规域名 HTTPS。
+4. **客户端重新执行一键接入**：
+   在全新控制台生成带有全新指纹与 Token 的安装命令，在客户端重新运行即可。
 
 `FRP_ALLOW_INSECURE_HTTP=1` 仅供封闭测试网络或短期受控迁移；服务端与客户端均需显式配置。它会重新暴露明文凭据和管理命令，不适合公网、共享局域网或生产环境。不要将此值写入公开示例的默认配置。
 

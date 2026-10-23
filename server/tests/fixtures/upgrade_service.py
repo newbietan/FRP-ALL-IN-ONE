@@ -1,4 +1,5 @@
 """Tiny readiness server for real-Docker transaction tests."""
+import contextlib
 import json
 import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,4 +21,7 @@ class Handler(BaseHTTPRequestHandler):
 
 # The fixture is reachable only through Docker exec, never via the host network.
 if __name__ == "__main__":
-    HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()
+    port = 443
+    with contextlib.suppress(ValueError):
+        port = int(os.environ.get("PORT", "443"))
+    HTTPServer(("127.0.0.1", port), Handler).serve_forever()
