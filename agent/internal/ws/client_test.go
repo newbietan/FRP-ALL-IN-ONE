@@ -1,6 +1,8 @@
 package ws
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +14,80 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+func TestManagementURLRequiresTLS(t *testing.T) {
+	t.Setenv("FRP_ALLOW_INSECURE_HTTP", "")
+	for _, test := range []struct {
+		url     string
+		allowed bool
+	}{
+		{"wss://panel.example/ws/agent/device", true},
+		{"ws://127.0.0.1/ws/agent/device", true},
+		{"ws://[::1]/ws/agent/device", true},
+		{"ws://localhost/ws/agent/device", true},
+		{"ws://panel.example/ws/agent/device", false},
+		{"ws://127.0.0.1.attacker.example/ws", false},
+		{"https://panel.example/ws", false},
+		{"wss://user:secret@panel.example/ws", false},
+		{"wss:///missing-host", false},
+	} {
+		t.Run(test.url, func(t *testing.T) {
+			if allowed := validateServerURL(test.url) == nil; allowed != test.allowed {
+				t.Fatalf("allowed=%v, want %v", allowed, test.allowed)
+			}
+		})
+	}
+	t.Setenv("FRP_ALLOW_INSECURE_HTTP", "1")
+	if err := validateServerURL("ws://panel.example/ws/agent/device"); err != nil {
+		t.Fatalf("explicit development opt-in rejected: %v", err)
+	}
+}
+
+func TestSelfSignedTLSFingerprint(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+	}))
+	defer server.Close()
+
+	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
+	cert := server.Certificate()
+	sum := sha256.Sum256(cert.Raw)
+	actualFP := hex.EncodeToString(sum[:])
+	wrongFP := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	// Case 1: Default verification fails on untrusted self-signed cert
+	c1 := NewClient(wsURL, "client-1", "token", "test")
+	if err := c1.connect(); err == nil {
+		c1.Close()
+		t.Fatalf("expected connect to fail on self-signed cert without options")
+	}
+
+	// Case 2: InsecureTLS connects successfully
+	c2 := NewClient(wsURL, "client-2", "token", "test").WithTLS(true, "")
+	if err := c2.connect(); err != nil {
+		t.Fatalf("expected connect to succeed with InsecureTLS: %v", err)
+	}
+	c2.Close()
+
+	// Case 3: Correct Fingerprint connects successfully
+	c3 := NewClient(wsURL, "client-3", "token", "test").WithTLS(false, actualFP)
+	if err := c3.connect(); err != nil {
+		t.Fatalf("expected connect to succeed with matching fingerprint: %v", err)
+	}
+	c3.Close()
+
+	// Case 4: Wrong Fingerprint fails
+	c4 := NewClient(wsURL, "client-4", "token", "test").WithTLS(false, wrongFP)
+	if err := c4.connect(); err == nil {
+		c4.Close()
+		t.Fatalf("expected connect to fail with wrong fingerprint")
+	}
+}
 
 func TestSendSerializesConcurrentWrites(t *testing.T) {
 	const messageCount = 100

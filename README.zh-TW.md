@@ -25,6 +25,8 @@
   </p>
 </div>
 
+> **安全更新**：後端預設僅監聽本機回環位址，公網管理必須使用 HTTPS/WSS 並預設初始管理員；Docker Socket 改為明確選用。以下舊 HTTP 範例不再是生產環境預設，請先閱讀 [安全部署與遷移指南](docs/security.md)。
+
 <a id="demo"></a>
 
 ## 效果展示
@@ -78,7 +80,7 @@ flowchart TB
     end
 
     subgraph Server["服務端 VPS (單容器極簡部署)"]
-        SingleServer["frp-server 單容器<br/>Web 控制台與管理 API :8080<br/>內嵌 FRPS 穿透核心 :7000"]
+        SingleServer["frp-server 單容器<br/>Web 控制台與管理 API :443<br/>內嵌 FRPS 穿透核心 :7000"]
     end
 
     subgraph Clients["客戶端設備 (NAS / 雲主機 / PC / 路由器)"]
@@ -88,7 +90,7 @@ flowchart TB
     SERVER_IMG -.->|"一鍵拉取"| SingleServer
     AGENT_IMG -.->|"高速拉取"| DockerClient
 
-    DockerClient <-.->|"WebSocket 指標/日誌 (:8080)"| SingleServer
+    DockerClient <-.->|"WebSocket 指標/日誌 (:443)"| SingleServer
     DockerClient <-->|"FRP 數據隧道 (:7000)"| SingleServer
 ```
 
@@ -107,8 +109,8 @@ flowchart TB
 1. 打開 [GitHub Developer Settings](https://github.com/settings/developers)
 2. 點擊 **New OAuth App** 填寫：
    - **Application name**：`FRP Manager`（或自定義名稱）
-   - **Homepage URL**：`http://<你的服務器IP>:8080`（或你的域名）
-   - **Authorization callback URL**：`http://<你的服務器IP>:8080/api/auth/github/callback`
+   - **Homepage URL**：`https://<你的服務器公網IP或域名>`（若使用純 IP 模式，直接填寫如 `https://1.2.3.4`）
+   - **Authorization callback URL**：`https://<你的服務器公網IP或域名>/api/auth/github/callback`
 3. 創建後記錄 **Client ID**，並生成 **Client Secret**。
 
 ---
@@ -139,15 +141,20 @@ curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deplo
 cat > .env <<EOF
 GITHUB_CLIENT_ID=你的ClientID
 GITHUB_CLIENT_SECRET=你的ClientSecret
+# 純 IP 自簽模式填 https://<你的服務器公網IP>；已備案域名填 https://<你的域名>
+FRP_PUBLIC_URL=https://<你的服務器公網IP或域名>
+FRP_AUTO_SELF_SIGNED_TLS=1
+FRP_LISTEN_HOST=0.0.0.0
 SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
-INITIAL_ADMIN_GITHUB_USERNAME=你的GitHub用戶名
+INITIAL_ADMIN_GITHUB_ID=你的GitHub數字ID
 EOF
+chmod 600 .env
 
 # 一鍵拉取並啟動服務
 docker compose up -d
 ```
 
-啟動完成後，打開瀏覽器訪問 `http://<服務器IP>:8080` 即可開始使用。
+預設使用 443 端口原生 TLS / HTTPS。純 IP 模式下服務啟動時會自動簽發 IP SAN 自簽名證書，打開瀏覽器直接訪問 `https://<你的公網IP>` 即可開始使用（首次打開提示證書警告時點擊「高級」 -> 「繼續前往」）。詳見 [安全部署指南](docs/security.md)。
 
 > **客戶端接入說明**：登錄 Web 控制台後，在「設備管理」頁面點擊「添加新設備」，系統會自動生成對應的容器一鍵啟動命令，複製並在客戶端機器執行即可完成接入。
 
@@ -165,11 +172,9 @@ docker compose up -d
 
 | 端口 | 協議 | 用途說明 |
 | :--- | :--- | :--- |
-| **8080** | TCP | Web 管理控制台（默認訪問端口） |
-| **80** | TCP | HTTP 自動跳轉及 Let's Encrypt 證書申請驗證（啟用 HTTPS 時必選） |
-| **443** | TCP | Web 控制台 HTTPS 訪問（啟用 HTTPS 後可選） |
+| **443** | TCP | Web 管理控制台 HTTPS 訪問（預設端口，支援直接 IP 訪問） |
 | **7000** | TCP | FRP 穿透隧道主連接端口 |
-| **自定義區間** | TCP/UDP | 你映射出的遠程服務端口（如 6001、8081 等） |
+| **40000-60000** | TCP/UDP | 遠程穿透映射端口區間（推薦高位端口） |
 
 ---
 

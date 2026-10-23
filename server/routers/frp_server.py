@@ -7,10 +7,12 @@ from __future__ import annotations
 import contextlib
 import hmac
 import logging
+import os
 import secrets
 import subprocess
 import time
 
+# pi-lens-ignore: reportMissingImports
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -21,6 +23,7 @@ import frp_deploy
 import models
 from core import get_current_user, get_db
 from core.container_engine import run_docker
+from core.security import public_base_url, require_secure_transport
 
 logger = logging.getLogger(__name__)
 
@@ -350,25 +353,9 @@ async def get_agent_install_command(
     获取客户端一键拉取并执行的部署命令（无需预先创建设备）
     仅生成命令信息，绝不向数据库提前写入任何客户端记录，彻底杜绝幽灵设备
     """
-    server_ip = crud.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
-    tls_enabled = crud.get_config(db, models.ConfigKeys.TLS_ENABLED) == "true"
-    server_domain = (crud.get_config(db, models.ConfigKeys.SERVER_DOMAIN) or "").strip()
-    host_name = server_domain if (tls_enabled and server_domain) else server_ip
-
-    panel_access_port = (crud.get_config(db, models.ConfigKeys.PANEL_ACCESS_PORT) or "").strip()
-    forwarded_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").split(",")[0].strip().lower()
-    forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
-
-    scheme = "https" if forwarded_proto in ("https", "wss") or tls_enabled else "http"
-    if panel_access_port:
-        manager_host = f"{host_name}:{panel_access_port}"
-    elif forwarded_host:
-        manager_host = forwarded_host
-    else:
-        manager_host = host_name
-
+    require_secure_transport(request)
+    base_url = public_base_url(request, db)
     install_key = _get_or_create_install_token(db)
-    base_url = f"{scheme}://{manager_host}"
 
     return {
         "install_key": install_key,
@@ -408,6 +395,7 @@ async def _serve_agent_install_script(
     if platform not in {"linux", "darwin", "windows"}:
         raise HTTPException(status_code=400, detail="请选择 linux、darwin 或 windows 容器安装脚本")
 
+    require_secure_transport(request)
     server_key = _get_or_create_install_token(db)
 
     # client_id is an identifier, never a credential. Upgrade grants are redeemed
@@ -419,6 +407,8 @@ async def _serve_agent_install_script(
         raise HTTPException(status_code=403, detail="缺少有效安装密钥或受限升级凭据")
 
     if client_id:
+        if not (is_admin or upgrade_job_id):
+            raise HTTPException(status_code=403, detail="安装密钥只能注册新设备，访问已有设备需要管理员或单次升级凭据")
         client = crud_module.get_client(db, client_id=client_id)
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
@@ -432,32 +422,27 @@ async def _serve_agent_install_script(
     auth_token = crud_module.get_config(db, models.ConfigKeys.FRPS_AUTH_TOKEN) or "frp-token"
     server_ip = crud_module.get_config(db, models.ConfigKeys.SERVER_PUBLIC_IP) or "YOUR_SERVER_IP"
     frps_port = crud_module.get_config(db, models.ConfigKeys.FRPS_PORT) or "7000"
-    panel_access_port = (crud_module.get_config(db, models.ConfigKeys.PANEL_ACCESS_PORT) or "").strip()
+    from urllib.parse import urlsplit
 
-    forwarded_proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").split(",")[0].strip().lower()
-    forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
-
-    ws_scheme = "wss" if forwarded_proto in ("https", "wss") else "ws"
-
-    tls_enabled = crud_module.get_config(db, models.ConfigKeys.TLS_ENABLED) == "true"
-    server_domain = (crud_module.get_config(db, models.ConfigKeys.SERVER_DOMAIN) or "").strip()
-    host_name = server_domain if (tls_enabled and server_domain) else server_ip
-
-    if panel_access_port:
-        manager_host = f"{host_name}:{panel_access_port}"
-    elif forwarded_host:
-        manager_host = forwarded_host
-    else:
-        manager_host = host_name
+    public_url = urlsplit(public_base_url(request, db))
+    ws_scheme = "wss" if public_url.scheme == "https" else "ws"
+    manager_host = public_url.netloc
 
     client_id = client.id
     client_token = client.auth_token
 
+    tls_fingerprint = os.environ.get("FRP_TLS_FINGERPRINT", "")
+    if not tls_fingerprint:
+        from services.tls_manager import tls_manager
+        self_signed = tls_manager.get_self_signed_cert_info()
+        if self_signed:
+            tls_fingerprint = self_signed.get("fingerprint") or ""
+
     if platform == "windows":
-        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host, target_version, upgrade_job_id)
+        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint)
     else:
         os_type = "darwin" if platform == "darwin" else "linux"
-        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host, target_version, upgrade_job_id)
+        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint)
 
     return PlainTextResponse(content=script, media_type="text/plain", headers={
         "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"})
@@ -529,7 +514,7 @@ async def get_agent_upgrade_script(
     )
 
 
-def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None):
+def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None, tls_fingerprint=None):
     """生成 Windows PowerShell 容器一键部署脚本"""
     if manager_host is None:
         manager_host = server_ip
@@ -555,6 +540,9 @@ $CLIENT_TOKEN = {ps(client_token)}
 $CLIENT_ID = {ps(client_id)}
 $IMAGE = {ps(image)}
 $MANAGER_WS_URL = {ps(manager_ws_url)}
+$TLS_FINGERPRINT = {ps(tls_fingerprint or '')}
+$ENABLE_REMOTE_UPGRADE = {'$true' if os.environ.get('FRP_ENABLE_REMOTE_UPGRADE') == '1' else '$false'}
+$ALLOW_INSECURE_HTTP = {ps('1' if os.environ.get('FRP_ALLOW_INSECURE_HTTP') == '1' else '0')}
 $INSTALL_DIR = "C:\\frp"
 $TARGET_VERSION = "{target_version}"
 $JOB_ID = "{upgrade_job_id or ''}"
@@ -631,6 +619,8 @@ if (!(Test-Path "$INSTALL_DIR\\frpc.toml")) {{
 }}
 New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Out-Null
 
+$SocketArgs = @()
+if ($ENABLE_REMOTE_UPGRADE) {{ $SocketArgs = @('-v', '/var/run/docker.sock:/var/run/docker.sock') }}
 & $CONTAINER_CLI run -d `
   --name frp-agent `
   --init `
@@ -638,8 +628,10 @@ New-Item -ItemType File -Path "$INSTALL_DIR\\.frp-all-in-one-client" -Force | Ou
   --restart always `
   --label io.frp-all-in-one.role=agent `
   --label com.centurylinklabs.watchtower.enable=false `
-  -v /var/run/docker.sock:/var/run/docker.sock `
+  @SocketArgs `
   -v "${{INSTALL_DIR}}:/opt/frp" `
+  -e FRP_ALLOW_INSECURE_HTTP="$ALLOW_INSECURE_HTTP" `
+  -e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT" `
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
   -e FRP_HOST_IP="$HOST_IP" `
   $IMAGE_ID `
@@ -676,7 +668,7 @@ Write-Host "& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubuserc
 '''
 
 
-def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None):
+def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None, tls_fingerprint=None):
     """生成 Linux/macOS 容器一键部署脚本（自动检测/就绪容器环境，统一拉取 TCR 客户端镜像）"""
     if manager_host is None:
         manager_host = server_ip
@@ -704,6 +696,9 @@ CLIENT_TOKEN={shlex.quote(client_token)}
 CLIENT_ID={shlex.quote(client_id)}
 IMAGE={shlex.quote(image)}
 MANAGER_WS_URL={shlex.quote(manager_ws_url)}
+TLS_FINGERPRINT={shlex.quote(tls_fingerprint or '')}
+ENABLE_REMOTE_UPGRADE={'1' if os.environ.get('FRP_ENABLE_REMOTE_UPGRADE') == '1' else '0'}
+ALLOW_INSECURE_HTTP={'1' if os.environ.get('FRP_ALLOW_INSECURE_HTTP') == '1' else '0'}
 INSTALL_DIR="{install_dir}"
 TARGET_VERSION="{target_version}"
 JOB_ID="{upgrade_job_id or ''}"
@@ -868,8 +863,11 @@ log_ok "本地配置文件已创建 (0600 权限)"
 
 log_info "[4/5] 新安装，正在使用已验证拉取的镜像启动..."
 SOCK_ARGS=()
-if [ "{os_type}" = "darwin" ] || [ -S "$SOCKET" ]; then
-    SOCK_ARGS=(-v "$SOCKET:/var/run/docker.sock")
+if [ "$ENABLE_REMOTE_UPGRADE" = "1" ]; then
+    log_warn "远程升级已显式启用：Docker Socket 等价于宿主机管理权限"
+    if [ "{os_type}" = "darwin" ] || [ -S "$SOCKET" ]; then
+        SOCK_ARGS=(-v "$SOCKET:/var/run/docker.sock")
+    fi
 fi
 
 $CONTAINER_CLI run -d \\
@@ -881,6 +879,8 @@ $CONTAINER_CLI run -d \\
   --label com.centurylinklabs.watchtower.enable=false \\
   "${{SOCK_ARGS[@]}}" \\
   -v "$INSTALL_DIR:/opt/frp" \\
+  -e FRP_ALLOW_INSECURE_HTTP="$ALLOW_INSECURE_HTTP" \\
+  -e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
   -e FRP_HOST_IP="$HOST_IP" \\
   "$IMAGE_ID" \\

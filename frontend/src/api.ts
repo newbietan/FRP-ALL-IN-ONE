@@ -79,9 +79,9 @@ export const authApi = {
   },
 
   /** 换绑 GitHub 账号 */
-  rebindGithub() {
-    const token = getToken();
-    window.location.assign(`/api/auth/github/rebind?token=${encodeURIComponent(token || '')}`);
+  async rebindGithub() {
+    const result = await request<{ authorization_url: string }>('POST', '/api/auth/github/rebind');
+    window.location.assign(result.authorization_url);
   },
 };
 

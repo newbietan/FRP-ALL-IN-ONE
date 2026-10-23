@@ -203,7 +203,7 @@ check_ports() {
     echo ""
     echo "[CHECK] 检查端口占用..."
 
-    for port in 8080 7000 7500; do
+    for port in "${PORT:-443}" 7000 7500; do
         if command -v lsof >/dev/null 2>&1 && lsof -Pi :"$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
             echo -e "${YELLOW}[WARN] 端口 $port 已被占用${NC}"
             echo "   请释放端口或修改 compose.yml 中配置"
@@ -267,7 +267,7 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Host-side upgrades are the safe default; no Docker Socket in the panel.
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
 COMPOSE_EOF
@@ -338,12 +338,17 @@ show_info() {
     fi
 
     echo "[访问地址]"
-    echo "   Web 管理界面: http://${PUBLIC_IP}:8080"
+    echo "   Web 管理界面: ${FRP_PUBLIC_URL:-https://你的面板域名}"
+    if [ "${FRP_AUTO_SELF_SIGNED_TLS:-0}" = "1" ]; then
+        echo -e "   ${YELLOW}[证书说明] 当前采用 IP 自签名证书模式。首次打开浏览器如提示“证书不受信任/安全警告”，请点击“高级” -> “继续前往”，传输全程受 TLS 1.3 强加密保护，国内免域名、免备案且不会被机房阻断。${NC}"
+    else
+        echo "   后端如监听 127.0.0.1:8080；请按 docs/security.md 配置宿主机 HTTPS 代理。"
+    fi
     echo "   FRP 穿透端口: ${PUBLIC_IP}:7000"
     echo ""
     echo "[登录方式]"
     echo "   使用 GitHub 账号登录"
-    echo -e "   ${YELLOW}* 首个登录的用户将自动成为管理员${NC}"
+    echo -e "   ${YELLOW}* 仅预设的 GitHub 账号可以完成首次管理员注册${NC}"
     echo ""
     echo "[移除本项目（保留数据库、证书与配置）]"
     printf '   curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/uninstall.sh | sudo bash -s -- server --dir %q\n' "$SCRIPT_DIR"
@@ -391,13 +396,47 @@ configure_env_vars() {
     # 自动识别公网 IP 并完整展示给用户
     detect_public_ip
 
+    if [ -z "${FRP_PUBLIC_URL:-}" ]; then
+        echo ""
+        echo -e "${YELLOW}请选择面板访问协议与部署模式：${NC}"
+        echo -e "  ${GREEN}[1] 纯 IP 自签 HTTPS 模式${NC} (推荐国内无备案服务器，直接使用 https://${PUBLIC_IP} 访问，免输端口号、免域名、免备案且全程 TLS 加密)"
+        echo -e "  [2] 已备案域名 HTTPS 模式 (需已在当前服务商完成备案，如 https://panel.example.com)"
+        echo -e "  [3] 自定义完整 URL"
+        read_input "请选择模式 [回车默认: 1]: " DEPLOY_MODE_CHOICE
+        DEPLOY_MODE_CHOICE="${DEPLOY_MODE_CHOICE:-1}"
+
+        if [ "$DEPLOY_MODE_CHOICE" = "1" ]; then
+            FRP_PUBLIC_URL="https://${PUBLIC_IP}"
+            PORT="443"
+            FRP_AUTO_SELF_SIGNED_TLS="1"
+            FRP_LISTEN_HOST="0.0.0.0"
+            _save_to_system_env "PORT" "443"
+            _save_to_system_env "FRP_AUTO_SELF_SIGNED_TLS" "1"
+            _save_to_system_env "FRP_LISTEN_HOST" "0.0.0.0"
+            echo -e "${GREEN}[OK] 已选择纯 IP 自签名 HTTPS 模式: ${FRP_PUBLIC_URL} (默认 443 端口)${NC}"
+        elif [ "$DEPLOY_MODE_CHOICE" = "2" ]; then
+            while ! [[ "${FRP_PUBLIC_URL:-}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; do
+                read_input "请输入已备案的域名地址（如 https://panel.example.com）: " FRP_PUBLIC_URL
+                if ! [[ "${FRP_PUBLIC_URL:-}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; then
+                    echo -e "${RED}必须以 https:// 开头并填写有效域名${NC}"
+                fi
+            done
+        else
+            while ! [[ "${FRP_PUBLIC_URL:-}" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; do
+                read_input "请输入自定义面板访问地址（如 https://...）: " FRP_PUBLIC_URL
+            done
+        fi
+    fi
+    FRP_PUBLIC_URL="${FRP_PUBLIC_URL%/}"
+    _save_to_system_env "FRP_PUBLIC_URL" "$FRP_PUBLIC_URL"
+
     # ---- GITHUB_CLIENT_ID ----
     if [ -z "${GITHUB_CLIENT_ID:-}" ]; then
         echo ""
         echo -e "${YELLOW}本系统使用 GitHub OAuth 登录。${NC}"
         echo "请先在 GitHub 创建 OAuth App: https://github.com/settings/developers"
-        echo -e "  - Homepage URL:            ${GREEN}http://${PUBLIC_IP}:8080${NC}"
-        echo -e "  - Authorization callback:  ${GREEN}http://${PUBLIC_IP}:8080/api/auth/github/callback${NC}"
+        echo -e "  - Homepage URL:            ${GREEN}${FRP_PUBLIC_URL}${NC}"
+        echo -e "  - Authorization callback:  ${GREEN}${FRP_PUBLIC_URL}/api/auth/github/callback${NC}"
         echo ""
         while true; do
             read_input "请输入 GITHUB_CLIENT_ID: " GITHUB_CLIENT_ID
@@ -429,13 +468,17 @@ configure_env_vars() {
     if [ -z "${INITIAL_ADMIN_GITHUB_ID:-}" ] && [ -z "${INITIAL_ADMIN_GITHUB_USERNAME:-}" ]; then
         echo ""
         echo -e "${YELLOW}[安全加固] 初始超级管理员限制（防公网抢注）：${NC}"
-        echo "  强烈建议指定管理员的 GitHub 账号，仅该账号首次登录可激活为唯一超级管理员。"
+        echo "  必须指定管理员的 GitHub 账号，否则系统拒绝首次管理员注册。"
         echo -e "  ${BLUE}[获取指引]${NC}"
         echo "   - GitHub 数字ID (推荐，永久不变): 浏览器打开 https://api.github.com/users/你的用户名 查看到 id"
         echo "   - GitHub 用户名: 登录 GitHub 后右上角头像处显示的用户名 (如 newbietan)"
         echo ""
-        read_input "请输入管理员 GitHub 数字ID 或 用户名（建议填写，直接回车跳过）: " INITIAL_ADMIN_INPUT
-        INITIAL_ADMIN_INPUT=$(echo "${INITIAL_ADMIN_INPUT:-}" | tr -d ' \r\n')
+        while true; do
+            read_input "请输入管理员 GitHub 数字ID 或 用户名（必填）: " INITIAL_ADMIN_INPUT
+            INITIAL_ADMIN_INPUT=$(echo "${INITIAL_ADMIN_INPUT:-}" | tr -d ' \r\n')
+            [ -n "$INITIAL_ADMIN_INPUT" ] && break
+            echo -e "${RED}管理员身份不能为空，请重新输入${NC}"
+        done
         if [ -n "$INITIAL_ADMIN_INPUT" ]; then
             if echo "$INITIAL_ADMIN_INPUT" | grep -Eq '^[0-9]+$'; then
                 INITIAL_ADMIN_GITHUB_ID="$INITIAL_ADMIN_INPUT"
@@ -460,8 +503,12 @@ configure_env_vars() {
 
     # 写入项目 .env 文件（供 docker compose 使用）
     cat > "$ENV_FILE" <<ENVEOF
+PORT=${PORT:-443}
 GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
 GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+FRP_PUBLIC_URL=${FRP_PUBLIC_URL}
+FRP_AUTO_SELF_SIGNED_TLS=${FRP_AUTO_SELF_SIGNED_TLS:-0}
+FRP_LISTEN_HOST=${FRP_LISTEN_HOST:-}
 SECRET_KEY=${SECRET_KEY}
 INITIAL_ADMIN_GITHUB_ID=${INITIAL_ADMIN_GITHUB_ID:-}
 INITIAL_ADMIN_GITHUB_USERNAME=${INITIAL_ADMIN_GITHUB_USERNAME:-}
@@ -469,8 +516,12 @@ ENVEOF
     chmod 600 "$ENV_FILE"
 
     # 导出到当前 shell（供 docker compose 使用）
+    export PORT
     export GITHUB_CLIENT_ID
     export GITHUB_CLIENT_SECRET
+    export FRP_PUBLIC_URL
+    export FRP_AUTO_SELF_SIGNED_TLS
+    export FRP_LISTEN_HOST
     export SECRET_KEY
     export INITIAL_ADMIN_GITHUB_ID
     export INITIAL_ADMIN_GITHUB_USERNAME

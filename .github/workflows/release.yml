@@ -29,7 +29,7 @@ env:
   NAMESPACE: frp-all-in-one
   SERVER_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-server
   AGENT_IMAGE: sgccr.ccs.tencentyun.com/frp-all-in-one/frp-agent
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.26.10'
 
 jobs:
   # ===========================

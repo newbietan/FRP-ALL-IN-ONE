@@ -9,9 +9,9 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from core import get_current_user, get_db
 import crud
 import models
+from core import get_current_user, get_db
 from websocket_manager import manager as ws_manager
 
 router = APIRouter(prefix="/agents", tags=["Agent 管理"])
@@ -190,18 +190,17 @@ async def get_websocket_stats(
 
 
 def _upgrade_command(client, request: Request, db: Session) -> dict:
-    import re
     from urllib.parse import urlencode
 
+    from core.security import public_base_url, require_secure_transport
     from routers.clients import _build_client_agent_info
     from services.agent_upgrades import issue_grant
 
     info = _build_client_agent_info(db, client.id)
     os_type = (info.get("os") or "linux").lower()
     platform = "windows" if os_type == "windows" else ("darwin" if os_type in ("darwin", "macos") else "linux")
-    base = (request.headers.get("origin") or str(request.base_url)).rstrip("/")
-    if not re.fullmatch(r"https?://[A-Za-z0-9.\-:\[\]]+", base):
-        raise HTTPException(status_code=400, detail="面板访问地址无效")
+    require_secure_transport(request)
+    base = public_base_url(request, db)
     target = f"v{models.APP_VERSION}"
     grant = issue_grant(db, client.id, target)
     query = urlencode({"client_id": client.id, "grant": grant})
@@ -219,7 +218,7 @@ async def get_agent_upgrade_command(
     client_id: str, request: Request, db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
-    """管理员按需生成 10 分钟、单客户端、单次有效的命令。"""
+    """仅为受信任面板地址生成 10 分钟、单客户端、单次有效的命令。"""
     client = crud.get_client(db, client_id=client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")

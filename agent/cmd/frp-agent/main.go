@@ -35,7 +35,7 @@ import (
 )
 
 var (
-	version   = "3.2.14"
+	version   = "3.3.0"
 	buildTime = "unknown"
 )
 
@@ -65,6 +65,8 @@ func main() {
 	configPath := flag.String("config", "/opt/frp/frpc.toml", "frpc 配置文件路径")
 	logPath := flag.String("log", "/opt/frp/logs", "日志存储目录")
 	showVersion := flag.Bool("version", false, "显示版本信息")
+	insecureTLS := flag.Bool("insecure-tls", false, "允许自签名证书（跳过 CA 证书链校验，仍保留 TLS 传输加密）")
+	tlsFingerprint := flag.String("tls-fingerprint", "", "服务端证书 SHA256 指纹（自签名证书锁定校验，防中间人）")
 	healthcheck := flag.Bool("healthcheck", false, "检查管理连接、内核与隧道就绪状态")
 	expectedVersion := flag.String("expect-version", "", "健康检查期望的精确版本")
 
@@ -88,6 +90,12 @@ func main() {
 		effectiveToken = os.Getenv("FRP_AGENT_TOKEN")
 	}
 
+	effectiveInsecureTLS := *insecureTLS || os.Getenv("FRP_AGENT_INSECURE_TLS") == "1"
+	effectiveFingerprint := *tlsFingerprint
+	if effectiveFingerprint == "" {
+		effectiveFingerprint = os.Getenv("FRP_AGENT_TLS_FINGERPRINT")
+	}
+
 	// 验证必填参数
 	if *serverURL == "" || *clientID == "" || effectiveToken == "" {
 		fmt.Println("错误: server, id, token (或环境变量 FRP_AGENT_TOKEN) 参数为必填项")
@@ -105,12 +113,14 @@ func main() {
 
 	// 创建配置
 	cfg := &config.Config{
-		ServerURL:  *serverURL,
-		ClientID:   *clientID,
-		Token:      effectiveToken,
-		FRPCPath:   *frpcPath,
-		ConfigPath: *configPath,
-		LogPath:    *logPath,
+		ServerURL:      *serverURL,
+		ClientID:       *clientID,
+		Token:          effectiveToken,
+		FRPCPath:       *frpcPath,
+		ConfigPath:     *configPath,
+		LogPath:        *logPath,
+		InsecureTLS:    effectiveInsecureTLS,
+		TLSFingerprint: effectiveFingerprint,
 	}
 
 	// 初始化各模块
@@ -122,7 +132,7 @@ func main() {
 
 	sysMonitor := monitor.NewMonitor()
 	frpcManager := frpc.NewManager(cfg.ConfigPath, logCollector)
-	wsClient := ws.NewClient(cfg.ServerURL, cfg.ClientID, cfg.Token, version)
+	wsClient := ws.NewClient(cfg.ServerURL, cfg.ClientID, cfg.Token, version).WithTLS(cfg.InsecureTLS, cfg.TLSFingerprint)
 	ready := func() bool { return wsClient.IsConnected() && frpcManager.Healthy() }
 	upgrader := &upgrade.Runner{
 		Directory: filepath.Dir(cfg.ConfigPath), ClientID: cfg.ClientID, Version: version, Ready: ready,

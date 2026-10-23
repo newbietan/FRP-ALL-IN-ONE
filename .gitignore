@@ -8,7 +8,9 @@ coverage/
 !.env.example
 __pycache__/
 *.pyc
+.venv
 .venv/
+.pi-lens.json
 pyrightconfig.json
 data/
 server/bin/

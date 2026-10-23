@@ -52,7 +52,7 @@ async def test_agent_upgrade_endpoint():
         db.commit()
 
         agents_module = importlib.import_module("routers.agents")
-        req = Request({"type": "http", "scheme": "http", "server": ("panel.example", 8080), "headers": [], "path": "/", "root_path": ""})
+        req = Request({"type": "http", "scheme": "https", "server": ("panel.example", 443), "headers": [], "path": "/", "root_path": ""})
         admin = models.Admin(id=1, github_id=1, github_username="admin", is_superadmin=True)
 
         res = await agents_module.trigger_agent_upgrade(client_id, req, db, admin)

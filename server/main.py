@@ -6,14 +6,14 @@ FRP Manager API - 主入口
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import hmac
 import json as _json
 import os
-from pathlib import Path
 import re
 import time as _time
 import traceback
+from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -22,10 +22,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 import auth
-from core.rate_limit import setup_rate_limit
 import crud
-from database import SessionLocal, engine
 import models
+from core.rate_limit import setup_rate_limit
+from core.security import secure_transport_allowed
+from database import SessionLocal, engine
 from routers import agents as agents_router
 from routers import auth as auth_router
 from routers import clients as clients_router
@@ -241,9 +242,9 @@ def _get_admin_from_token(db: Session, token: str | None) -> models.Admin | None
     if not token:
         return None
     try:
-        payload = auth.jwt.decode(token, auth.get_secret_key(), algorithms=[auth.ALGORITHM])
+        payload = auth.jwt.decode(token, auth.get_secret_key(), algorithms=[auth.ALGORITHM], options={"require": ["exp"]})
         github_id_str = payload.get("sub")
-        if not github_id_str:
+        if payload.get("purpose") not in (None, "access") or not isinstance(github_id_str, str):
             return None
         github_id = int(github_id_str)
         user = crud.get_admin_by_github_id(db, github_id=github_id)
@@ -260,7 +261,7 @@ async def websocket_dashboard(websocket: WebSocket):
     - 后续由 Agent 上报、上下线事件、FRPS 状态变化触发增量推送
     - 服务端每 30 秒发送 ping 保持连接活跃
     """
-    if not _validate_ws_origin(websocket):
+    if not secure_transport_allowed(websocket) or not _validate_ws_origin(websocket):
         await websocket.close(code=1008)
         return
 
@@ -290,7 +291,7 @@ async def websocket_dashboard(websocket: WebSocket):
         while True:
             try:
                 await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
         print("[WS Dashboard] Client disconnected normally")
@@ -307,6 +308,10 @@ async def websocket_agent(websocket: WebSocket, client_id: str):
     Agent 双向通信通道
     接收 Agent 上报的系统信息、日志等
     """
+    if not secure_transport_allowed(websocket):
+        await websocket.close(code=1008)
+        return
+
     header_client_id = (websocket.headers.get("x-client-id") or "").strip()
     header_token = (websocket.headers.get("x-client-token") or "").strip()
     if header_client_id and header_client_id != client_id:
@@ -346,7 +351,7 @@ async def websocket_logs(websocket: WebSocket, client_id: str):
     日志实时订阅
     前端订阅某个客户端的日志流
     """
-    if not _validate_ws_origin(websocket):
+    if not secure_transport_allowed(websocket) or not _validate_ws_origin(websocket):
         await websocket.close(code=1008)
         return
 
@@ -521,7 +526,7 @@ async def _handle_agent_message(client_id: str, msg: dict):
             # 持久化当前指标（每 30 秒一条，取代每次都写）
             metrics = models.SystemMetrics(
                 client_id=client_id,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 cpu_percent=data.get("cpu_percent"),
                 memory_used=data.get("memory_used"),
                 memory_total=data.get("memory_total"),
@@ -614,14 +619,22 @@ if _static_dir.is_dir():
     if _assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa_frontend(full_path: str):
-        if full_path in ("api", "ws") or full_path.startswith(("api/", "ws/")):
-            raise HTTPException(status_code=404, detail="API route not found")
-        target = _static_dir / full_path
+
+@app.get("/{full_path:path}")
+async def serve_spa_frontend(full_path: str):
+    if full_path in ("api", "ws") or full_path.startswith(("api/", "ws/")):
+        raise HTTPException(status_code=404, detail="API route not found")
+    try:
+        relative = Path(full_path)
+        if relative.is_absolute() or ".." in relative.parts or any(part.startswith(".") for part in relative.parts):
+            raise ValueError("unsafe static path")
+        root = _static_dir.resolve()
+        target = (root / relative).resolve()
+        target.relative_to(root)  # Reject symlinks escaping the static tree, too.
         if target.is_file():
             return FileResponse(str(target))
-        index_path = _static_dir / "index.html"
+        index_path = (root / "index.html").resolve()
+        index_path.relative_to(root)
         if index_path.is_file():
             return FileResponse(
                 str(index_path),
@@ -631,4 +644,6 @@ if _static_dir.is_dir():
                     "Expires": "0",
                 },
             )
-        raise HTTPException(status_code=404, detail="Frontend assets not found")
+    except (ValueError, OSError, RuntimeError):
+        pass
+    raise HTTPException(status_code=404, detail="Frontend assets not found")

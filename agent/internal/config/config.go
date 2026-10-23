@@ -20,4 +20,10 @@ type Config struct {
 
 	// LogPath 日志存储目录
 	LogPath string
+
+	// InsecureTLS 允许跳过 CA 证书链校验（仍保留 TLS 传输加密）
+	InsecureTLS bool
+
+	// TLSFingerprint 服务端证书 SHA256 指纹（自签名证书 Pinning 锁定）
+	TLSFingerprint string
 }

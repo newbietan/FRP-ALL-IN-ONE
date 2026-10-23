@@ -37,7 +37,7 @@ def db():
 def http(db):
     main.app.dependency_overrides[get_db] = lambda: db
     try:
-        yield TestClient(main.app)
+        yield TestClient(main.app, base_url="https://testserver")
     finally:
         main.app.dependency_overrides.clear()
 
@@ -172,10 +172,11 @@ async def test_legacy_agent_does_not_receive_fake_upgrade_signal(db, monkeypatch
 
 def test_command_keeps_origin_port_and_bounded_credential(db, http):
     main.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace()
-    response = http.post("/api/agents/fixture-client/upgrade-command", headers={"origin": "https://panel.example:10967"})
+    response = http.post("/api/agents/fixture-client/upgrade-command", headers={"host": "panel.example:10967", "origin": "https://untrusted.example"})
     assert response.status_code == 200
     command = response.json()["upgrade_command"]
     assert "https://panel.example:10967/" in command
+    assert "untrusted.example" not in command
     assert db.query(models.Client).first().auth_token not in command
     assert response.json()["expires_in"] == 600
 

@@ -25,6 +25,8 @@
   </p>
 </div>
 
+> **Security update:** the backend now binds to loopback by default. Public administration requires HTTPS/WSS and a preset initial administrator. Docker Socket mounts are opt-in. The older HTTP deployment examples below are not production defaults; read [secure deployment and migration](docs/security.md) first.
+
 <a id="demo"></a>
 
 ## Demo
@@ -78,7 +80,7 @@ flowchart TB
     end
 
     subgraph Server["Server VPS (Single Container Deployment)"]
-        SingleServer["frp-server Single Container<br/>Web Console & Management API :8080<br/>Embedded FRPS Core :7000"]
+        SingleServer["frp-server Single Container<br/>Web Console & Management API :443<br/>Embedded FRPS Core :7000"]
     end
 
     subgraph Clients["Client Devices (NAS / Linux / PC / Edge)"]
@@ -88,7 +90,7 @@ flowchart TB
     SERVER_IMG -.->|"Pull"| SingleServer
     AGENT_IMG -.->|"High-speed Pull"| DockerClient
 
-    DockerClient <-.->|"WebSocket Metrics/Logs (:8080)"| SingleServer
+    DockerClient <-.->|"WebSocket Metrics/Logs (:443)"| SingleServer
     DockerClient <-->|"FRP Data Tunnel (:7000)"| SingleServer
 ```
 
@@ -107,8 +109,8 @@ This platform uses GitHub OAuth for authentication. Create your OAuth App first:
 1. Open [GitHub Developer Settings](https://github.com/settings/developers)
 2. Click **New OAuth App**:
    - **Application name**: `FRP Manager`
-   - **Homepage URL**: `http://<YOUR_SERVER_IP>:8080` (or domain)
-   - **Authorization callback URL**: `http://<YOUR_SERVER_IP>:8080/api/auth/github/callback`
+   - **Homepage URL**: `https://<YOUR_SERVER_IP_OR_DOMAIN>` (e.g. `https://1.2.3.4` if using direct IP mode)
+   - **Authorization callback URL**: `https://<YOUR_SERVER_IP_OR_DOMAIN>/api/auth/github/callback`
 3. Save your **Client ID** and generate a **Client Secret**.
 
 ---
@@ -139,15 +141,20 @@ curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deplo
 cat > .env <<EOF
 GITHUB_CLIENT_ID=your_client_id
 GITHUB_CLIENT_SECRET=your_client_secret
+# Direct IP mode: https://<YOUR_PUBLIC_IP>; Domain mode: https://<YOUR_DOMAIN>
+FRP_PUBLIC_URL=https://<YOUR_SERVER_IP_OR_DOMAIN>
+FRP_AUTO_SELF_SIGNED_TLS=1
+FRP_LISTEN_HOST=0.0.0.0
 SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
-INITIAL_ADMIN_GITHUB_USERNAME=your_github_username
+INITIAL_ADMIN_GITHUB_ID=your_github_numeric_id
 EOF
+chmod 600 .env
 
 # Pull and start services
 docker compose up -d
 ```
 
-Open `http://<YOUR_SERVER_IP>:8080` in your browser.
+The Web Console defaults to port 443 with native TLS. Open `https://<YOUR_SERVER_IP>` in your browser (if using self-signed IP certificate, accept the browser warning on first visit via Advanced -> Proceed). See [Security Guide](docs/security.md).
 
 > **Client Device Onboarding**: Once the server is running, log into the Web Console, go to **Devices** → click **Add Device**, and copy the auto-generated one-click container command or setup script to your edge device.
 
@@ -165,11 +172,9 @@ Ensure the following ports are allowed in your server's security group:
 
 | Port | Protocol | Usage |
 | :--- | :--- | :--- |
-| **8080** | TCP | Web Management Console (Default) |
-| **80** | TCP | HTTP redirect and Let's Encrypt validation (Required for HTTPS) |
-| **443** | TCP | Web Console HTTPS access (Optional) |
+| **443** | TCP | Web Management Console HTTPS (Default port, direct IP `https://<IP>` supported) |
 | **7000** | TCP | FRP Tunnel Control port |
-| **Custom range** | TCP/UDP | Your exposed remote service ports (e.g. 6001, 8081) |
+| **40000-60000** | TCP/UDP | Remote exposed port range (Recommended) |
 
 ---
 

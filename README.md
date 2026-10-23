@@ -78,7 +78,7 @@ flowchart TB
     end
 
     subgraph Server["服务端 VPS (单容器极简部署)"]
-        SingleServer["frp-server 单容器<br/>Web 控制台与管理 API :8080<br/>内嵌 FRPS 穿透核心 :7000"]
+        SingleServer["frp-server 单容器<br/>Web 控制台与管理 API :443<br/>内嵌 FRPS 穿透核心 :7000"]
     end
 
     subgraph Clients["客户端设备 (NAS / 云主机 / PC / 路由器)"]
@@ -88,7 +88,7 @@ flowchart TB
     SERVER_IMG -.->|"一键拉取"| SingleServer
     AGENT_IMG -.->|"国内极速拉取"| DockerClient
 
-    DockerClient <-.->|"WebSocket 指标/日志 (:8080)"| SingleServer
+    DockerClient <-.->|"WebSocket 指标/日志 (:443)"| SingleServer
     DockerClient <-->|"FRP 数据隧道 (:7000)"| SingleServer
 ```
 
@@ -97,6 +97,8 @@ flowchart TB
 <a id="quick-start-server"></a>
 
 ## 服务端部署指南
+
+> **安全部署**：默认采用 443 端口原生 TLS / HTTPS，公网管理必须使用 HTTPS/WSS（支持国内免备案 IP 自签模式，浏览器直接打开 `https://<IP>` 即可访问），首次登录必须预设管理员身份。新安装不再默认挂载 Docker Socket。部署和旧版本迁移请先阅读 [安全部署指南](docs/security.md)。
 
 > **提示**：无需使用 `git clone` 拷贝项目源码！服务端仅需通过标准容器编排拉取公开镜像即可启动。
 
@@ -107,8 +109,8 @@ flowchart TB
 1. 打开 [GitHub Developer Settings](https://github.com/settings/developers)
 2. 点击 **New OAuth App** 填写：
    - **Application name**：`FRP Manager`（或自定义名称）
-   - **Homepage URL**：`http://<你的服务器IP>:8080`（或你的域名）
-   - **Authorization callback URL**：`http://<你的服务器IP>:8080/api/auth/github/callback`
+   - **Homepage URL**：`https://<你的服务器公网IP或域名>`（若使用默认自签 IP 模式，直接填写如 `https://1.2.3.4`）
+   - **Authorization callback URL**：`https://<你的服务器公网IP或域名>/api/auth/github/callback`
 3. 创建后记录 **Client ID**，并生成 **Client Secret**。
 
 ---
@@ -139,15 +141,20 @@ curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deplo
 cat > .env <<EOF
 GITHUB_CLIENT_ID=你的ClientID
 GITHUB_CLIENT_SECRET=你的ClientSecret
+# 纯 IP 自签模式填 https://<你的服务器公网IP>；已备案域名填 https://<你的域名>
+FRP_PUBLIC_URL=https://<你的服务器公网IP或域名>
+FRP_AUTO_SELF_SIGNED_TLS=1
+FRP_LISTEN_HOST=0.0.0.0
 SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n/+=')
-INITIAL_ADMIN_GITHUB_USERNAME=你的GitHub用户名
+INITIAL_ADMIN_GITHUB_ID=你的GitHub数字ID
 EOF
+chmod 600 .env
 
 # 一键拉取并启动服务
 docker compose up -d
 ```
 
-启动完成后，打开浏览器访问 `http://<服务器IP>:8080` 即可开始使用。
+默认使用 443 端口原生 TLS / HTTPS。纯 IP 模式下服务启动时会自动签发 IP SAN 自签名证书，打开浏览器直接访问 `https://<你的公网IP>` 即可开始使用（首次打开提示证书警告时点击“高级” -> “继续前往”）。详见 [安全部署指南](docs/security.md)。
 
 > **客户端接入说明**：登录 Web 控制台后，在「设备管理」页面点击「添加新设备」，系统会自动生成对应的容器一键启动命令（支持 Docker、Linux 自动安装脚本、Windows 与 macOS 引导），复制并在客户端机器执行即可完成接入。
 
@@ -194,11 +201,9 @@ Web 设备列表的“最后心跳时间”按浏览器本地时区显示为 `YY
 
 | 端口 | 协议 | 用途说明 |
 | :--- | :--- | :--- |
-| **8080** | TCP | Web 管理控制台（默认访问端口） |
-| **80** | TCP | HTTP 自动跳转及 Let's Encrypt 证书申请验证（启用 HTTPS 时必选） |
-| **443** | TCP | Web 控制台 HTTPS 访问（启用 HTTPS 后可选） |
+| **443** | TCP | Web 管理控制台 HTTPS（默认端口，浏览器直接访问 `https://<IP>` 无需输入端口号） |
 | **7000** | TCP | FRP 穿透隧道主连接端口 |
-| **自定义区间** | TCP/UDP | 你映射出的远程服务端口（如 6001、8081 等） |
+| **40000-60000** | TCP/UDP | 远程穿透映射端口区间（推荐高位端口） |
 
 ---
 

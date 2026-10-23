@@ -32,6 +32,7 @@ def _get_certs_dir() -> Path:
 # 证书存储路径
 CERTS_DIR = _get_certs_dir()
 AUTO_CERTS_DIR = CERTS_DIR / "auto"
+SELF_SIGNED_CERTS_DIR = CERTS_DIR / "self_signed"
 NGINX_CONFIG_PATH = Path("/etc/nginx/conf.d")
 
 # acme.sh 路径
@@ -486,6 +487,84 @@ server {{
         if info and "days_until_expiry" in info:
             return info["days_until_expiry"] <= days_before
         return False
+
+    @property
+    def self_signed_dir(self) -> Path:
+        return _get_certs_dir() / "self_signed"
+
+    def compute_cert_fingerprint(self, cert_path: Path | str) -> str | None:
+        """计算证书文件的 SHA256 指纹 (与 openssl x509 -fingerprint -sha256 一致)"""
+        path = Path(cert_path)
+        if not path.is_file():
+            return None
+        try:
+            import hashlib
+            import ssl
+            pem = path.read_text(encoding="utf-8")
+            der = ssl.PEM_cert_to_DER_cert(pem)
+            return hashlib.sha256(der).hexdigest().lower()
+        except Exception as e:
+            logger.debug("计算证书 %s 指纹失败: %s", path, e)
+            return None
+
+    def get_self_signed_cert_info(self) -> dict[str, Any] | None:
+        """获取当前自签名证书路径与指纹"""
+        cert_path = self.self_signed_dir / "server.crt"
+        key_path = self.self_signed_dir / "server.key"
+        if not (cert_path.is_file() and key_path.is_file()):
+            return None
+        fp = self.compute_cert_fingerprint(cert_path)
+        return {
+            "cert_path": str(cert_path),
+            "key_path": str(key_path),
+            "fingerprint": fp,
+        }
+
+    def ensure_self_signed_cert(self, host_or_ip: str = "127.0.0.1") -> tuple[Path, Path, str]:
+        """
+        确保持久化自签名证书存在，不存在则使用 OpenSSL 自动签发带有 IP/DNS SAN 的 10 年期证书。
+        返回 (cert_path, key_path, sha256_fingerprint)。
+        """
+        import ipaddress
+
+        target_dir = self.self_signed_dir
+        target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        cert_path = target_dir / "server.crt"
+        key_path = target_dir / "server.key"
+
+        if cert_path.is_file() and key_path.is_file():
+            fp = self.compute_cert_fingerprint(cert_path)
+            if fp:
+                return cert_path, key_path, fp
+
+        clean_host = (host_or_ip or "127.0.0.1").strip()
+        is_ip = False
+        with contextlib.suppress(ValueError):
+            ipaddress.ip_address(clean_host)
+            is_ip = True
+
+        san_entries = [f"IP:{clean_host}" if is_ip else f"DNS:{clean_host}", "IP:127.0.0.1", "DNS:localhost"]
+        san_str = ",".join(san_entries)
+
+        cmd = [
+            "openssl", "req", "-x509", "-nodes", "-days", "3650",
+            "-newkey", "rsa:2048",
+            "-keyout", str(key_path),
+            "-out", str(cert_path),
+            "-subj", f"/CN={clean_host}",
+            "-addext", f"subjectAltName={san_str}",
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"自动生成自签名证书失败: {result.stderr or result.stdout}")
+
+        with contextlib.suppress(OSError):
+            key_path.chmod(0o600)
+            cert_path.chmod(0o644)
+
+        fp = self.compute_cert_fingerprint(cert_path) or ""
+        return cert_path, key_path, fp
 
 
 # 全局实例

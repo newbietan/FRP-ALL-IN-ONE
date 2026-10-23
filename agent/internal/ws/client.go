@@ -2,17 +2,23 @@
 package ws
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/frp-manager/agent/internal/monitor"
 	"github.com/frp-manager/agent/internal/upgrade"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -25,10 +31,12 @@ type Message struct {
 
 // Client WebSocket 客户端
 type Client struct {
-	serverURL string
-	clientID  string
-	token     string
-	version   string // Agent 版本
+	serverURL      string
+	clientID       string
+	token          string
+	version        string // Agent 版本
+	insecureTLS    bool   // 允许自签名证书（跳过 CA 证书链校验）
+	tlsFingerprint string // 自签名证书 SHA256 指纹锁定 (hex)
 
 	conn         *websocket.Conn
 	mu           sync.RWMutex
@@ -49,6 +57,15 @@ func NewClient(serverURL, clientID, token, version string) *Client {
 		version:   version,
 		reconnect: true,
 	}
+}
+
+// WithTLS 配置自签名证书 TLS 握手及指纹校验策略
+func (c *Client) WithTLS(insecure bool, fingerprint string) *Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.insecureTLS = insecure
+	c.tlsFingerprint = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(fingerprint, ":", ""), " ", ""))
+	return c
 }
 
 // Connect 连接到服务端
@@ -93,15 +110,62 @@ func (c *Client) shouldReconnect() bool {
 	return c.isRunning && c.reconnect
 }
 
+func validateServerURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return fmt.Errorf("invalid management WebSocket URL")
+	}
+	if u.Scheme == "wss" {
+		return nil
+	}
+	ip := net.ParseIP(u.Hostname())
+	loopback := u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())
+	if u.Scheme == "ws" && (loopback || os.Getenv("FRP_ALLOW_INSECURE_HTTP") == "1") {
+		return nil
+	}
+	return fmt.Errorf("management credentials require TLS; insecure transport requires explicit FRP_ALLOW_INSECURE_HTTP=1")
+}
+
 func (c *Client) connect() error {
+	if err := validateServerURL(c.serverURL); err != nil {
+		return err
+	}
 	// 构建带认证的请求头
 	header := http.Header{}
 	header.Add("X-Client-Token", c.token)
 	header.Add("X-Client-ID", c.clientID)
 
 	// 连接服务端
-	dialer := websocket.DefaultDialer
+	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = 10 * time.Second
+
+	if strings.HasPrefix(c.serverURL, "wss://") {
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		c.mu.RLock()
+		insecure := c.insecureTLS
+		fp := c.tlsFingerprint
+		c.mu.RUnlock()
+
+		if insecure || fp != "" {
+			tlsConfig.InsecureSkipVerify = true
+			if fp != "" {
+				tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+					if len(cs.PeerCertificates) == 0 {
+						return fmt.Errorf("no peer certificate presented by server")
+					}
+					sum := sha256.Sum256(cs.PeerCertificates[0].Raw)
+					actualFP := hex.EncodeToString(sum[:])
+					if actualFP != fp {
+						return fmt.Errorf("certificate fingerprint mismatch: expected %s, got %s", fp, actualFP)
+					}
+					return nil
+				}
+			}
+		}
+		dialer.TLSClientConfig = tlsConfig
+	}
 
 	conn, _, err := dialer.Dial(c.serverURL, header)
 	if err != nil {
