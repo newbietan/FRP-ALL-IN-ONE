@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 FRP 服务端管理路由
 包含 FRPS 部署、端口管理、Agent 安装脚本生成等
@@ -361,9 +362,9 @@ async def get_agent_install_command(
         "install_key": install_key,
         "base_url": base_url,
         "commands": {
-            "linux": f"curl -fsSL '{base_url}/api/frp/agent/install/linux?key={install_key}' | sudo bash",
-            "darwin": f"curl -fsSL '{base_url}/api/frp/agent/install/darwin?key={install_key}' | bash",
-            "windows": f"& ([scriptblock]::Create((Invoke-RestMethod '{base_url}/api/frp/agent/install/windows?key={install_key}')))"
+            "linux": f"curl -kfsSL '{base_url}/api/frp/agent/install/linux?key={install_key}' | sudo bash",
+            "darwin": f"curl -kfsSL '{base_url}/api/frp/agent/install/darwin?key={install_key}' | bash",
+            "windows": f"[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; & ([scriptblock]::Create((Invoke-RestMethod '{base_url}/api/frp/agent/install/windows?key={install_key}')))"
         }
     }
 
@@ -434,15 +435,29 @@ async def _serve_agent_install_script(
     tls_fingerprint = os.environ.get("FRP_TLS_FINGERPRINT", "")
     if not tls_fingerprint:
         from services.tls_manager import tls_manager
-        self_signed = tls_manager.get_self_signed_cert_info()
-        if self_signed:
-            tls_fingerprint = self_signed.get("fingerprint") or ""
+        if os.environ.get("FRP_TLS_CERT"):
+            tls_fingerprint = tls_manager.compute_cert_fingerprint(os.environ["FRP_TLS_CERT"]) or ""
+        if not tls_fingerprint:
+            self_signed = tls_manager.get_self_signed_cert_info()
+            if self_signed:
+                tls_fingerprint = self_signed.get("fingerprint") or ""
+
+    import ipaddress
+    is_ip = False
+    with contextlib.suppress(ValueError):
+        ipaddress.ip_address(public_url.hostname or "")
+        is_ip = True
+
+    insecure_tls = (
+        os.environ.get("FRP_AGENT_INSECURE_TLS") == "1"
+        or (ws_scheme == "wss" and not tls_fingerprint and is_ip)
+    )
 
     if platform == "windows":
-        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint)
+        script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint, insecure_tls=insecure_tls)
     else:
         os_type = "darwin" if platform == "darwin" else "linux"
-        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint)
+        script = _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint, insecure_tls=insecure_tls)
 
     return PlainTextResponse(content=script, media_type="text/plain", headers={
         "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"})
@@ -514,7 +529,7 @@ async def get_agent_upgrade_script(
     )
 
 
-def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None, tls_fingerprint=None):
+def _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None, tls_fingerprint=None, insecure_tls=False):
     """生成 Windows PowerShell 容器一键部署脚本"""
     if manager_host is None:
         manager_host = server_ip
@@ -541,6 +556,7 @@ $CLIENT_ID = {ps(client_id)}
 $IMAGE = {ps(image)}
 $MANAGER_WS_URL = {ps(manager_ws_url)}
 $TLS_FINGERPRINT = {ps(tls_fingerprint or '')}
+$INSECURE_TLS = {ps('1' if insecure_tls else '0')}
 $ENABLE_REMOTE_UPGRADE = {'$true' if os.environ.get('FRP_ENABLE_REMOTE_UPGRADE') == '1' else '$false'}
 $ALLOW_INSECURE_HTTP = {ps('1' if os.environ.get('FRP_ALLOW_INSECURE_HTTP') == '1' else '0')}
 $INSTALL_DIR = "C:\\frp"
@@ -631,6 +647,7 @@ if ($ENABLE_REMOTE_UPGRADE) {{ $SocketArgs = @('-v', '/var/run/docker.sock:/var/
   @SocketArgs `
   -v "${{INSTALL_DIR}}:/opt/frp" `
   -e FRP_ALLOW_INSECURE_HTTP="$ALLOW_INSECURE_HTTP" `
+  -e FRP_AGENT_INSECURE_TLS="$INSECURE_TLS" `
   -e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT" `
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
   -e FRP_HOST_IP="$HOST_IP" `
@@ -668,7 +685,7 @@ Write-Host "& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubuserc
 '''
 
 
-def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None, tls_fingerprint=None):
+def _generate_unix_script(server_ip, frps_port, auth_token, client_id, client_token, os_type, ws_scheme="ws", manager_host=None, target_version=None, upgrade_job_id=None, tls_fingerprint=None, insecure_tls=False):
     """生成 Linux/macOS 容器一键部署脚本（自动检测/就绪容器环境，统一拉取 TCR 客户端镜像）"""
     if manager_host is None:
         manager_host = server_ip
@@ -697,6 +714,7 @@ CLIENT_ID={shlex.quote(client_id)}
 IMAGE={shlex.quote(image)}
 MANAGER_WS_URL={shlex.quote(manager_ws_url)}
 TLS_FINGERPRINT={shlex.quote(tls_fingerprint or '')}
+INSECURE_TLS={'1' if insecure_tls else '0'}
 ENABLE_REMOTE_UPGRADE={'1' if os.environ.get('FRP_ENABLE_REMOTE_UPGRADE') == '1' else '0'}
 ALLOW_INSECURE_HTTP={'1' if os.environ.get('FRP_ALLOW_INSECURE_HTTP') == '1' else '0'}
 INSTALL_DIR="{install_dir}"
@@ -880,6 +898,7 @@ $CONTAINER_CLI run -d \\
   "${{SOCK_ARGS[@]}}" \\
   -v "$INSTALL_DIR:/opt/frp" \\
   -e FRP_ALLOW_INSECURE_HTTP="$ALLOW_INSECURE_HTTP" \\
+  -e FRP_AGENT_INSECURE_TLS="$INSECURE_TLS" \\
   -e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
   -e FRP_HOST_IP="$HOST_IP" \\

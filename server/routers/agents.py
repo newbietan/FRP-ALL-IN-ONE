@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 Agent 管理路由
 包含 Agent 列表、详情、指标查询、配置推送等
@@ -206,10 +207,10 @@ def _upgrade_command(client, request: Request, db: Session) -> dict:
     query = urlencode({"client_id": client.id, "grant": grant})
     url = f"{base}/api/frp/agent/upgrade-script/{platform}?{query}"
     if platform == "windows":
-        command = f"& ([scriptblock]::Create((Invoke-RestMethod '{url}')))"
+        command = f"[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; & ([scriptblock]::Create((Invoke-RestMethod '{url}')))"
     else:
         runner = "bash" if platform == "darwin" else "sudo bash"
-        command = f"curl -fsSL '{url}' -o /tmp/frp-client-upgrade.sh && {runner} /tmp/frp-client-upgrade.sh"
+        command = f"curl -kfsSL '{url}' -o /tmp/frp-client-upgrade.sh && {runner} /tmp/frp-client-upgrade.sh"
     return {"upgrade_command": command, "target_version": target, "expires_in": 600}
 
 

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Security regressions use fake identities, in-memory SQL and local ASGI only."""
 from urllib.parse import parse_qs, urlsplit
 
@@ -309,3 +310,34 @@ def test_websocket_and_http_reject_wrong_purpose_and_nonexpiring_tokens(client, 
     unsigned = jwt.encode({"sub": str(admin.github_id)}, key="", algorithm="none")
     for token in (upgrade, no_expiry, unsigned):
         assert client.get("/api/auth/profile", headers={"Authorization": "Bearer " + token}).status_code == 401
+
+
+def test_install_command_supports_self_signed_tls(client, db):
+    admin = administrator(db)
+    token = access_token(admin)
+    response = client.get("/api/frp/agent/install-command", headers={"Authorization": "Bearer " + token})
+    assert response.status_code == 200
+    data = response.json()
+    assert "commands" in data
+    assert data["commands"]["linux"].startswith("curl -kfsSL '")
+    assert data["commands"]["linux"].endswith("' | sudo bash")
+    assert data["commands"]["darwin"].startswith("curl -kfsSL '")
+    assert data["commands"]["darwin"].endswith("' | bash")
+    assert "ServerCertificateValidationCallback" in data["commands"]["windows"]
+    assert "Invoke-RestMethod" in data["commands"]["windows"]
+
+
+def test_generate_script_insecure_tls_and_fingerprint():
+    arguments = ("120.46.213.43", 7000, "token", "client-1", "secret")
+    unix_script = frp_server._generate_unix_script(*arguments, "linux", tls_fingerprint="abc123fp", insecure_tls=True)
+    assert 'TLS_FINGERPRINT=abc123fp' in unix_script
+    assert 'INSECURE_TLS=1' in unix_script
+    assert '-e FRP_AGENT_INSECURE_TLS="$INSECURE_TLS"' in unix_script
+    assert '-e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT"' in unix_script
+
+    win_script = frp_server._generate_windows_script(*arguments, tls_fingerprint="abc123fp", insecure_tls=True)
+    assert "$TLS_FINGERPRINT = 'abc123fp'" in win_script
+    assert "$INSECURE_TLS = '1'" in win_script
+    assert '-e FRP_AGENT_INSECURE_TLS="$INSECURE_TLS"' in win_script
+    assert '-e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT"' in win_script
+
