@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 系统设置路由
 包含域名设置、HTTPS 配置等

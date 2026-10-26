@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """GitHub OAuth for the single-administrator installation."""
 from __future__ import annotations
 

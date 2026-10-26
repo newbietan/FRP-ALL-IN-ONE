@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Persisted Agent tasks and short-lived, single-use script capabilities."""
 from __future__ import annotations
 

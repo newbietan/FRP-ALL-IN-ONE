@@ -507,6 +507,29 @@ server {{
             logger.debug("计算证书 %s 指纹失败: %s", path, e)
             return None
 
+    def compute_cert_pubkey_pin(self, cert_path: Path | str) -> str | None:
+        """计算证书公钥的 SHA256 base64 指纹 (供 curl --pinnedpubkey 'sha256//...' 校验)"""
+        path = Path(cert_path)
+        if not path.is_file():
+            return None
+        try:
+            p1 = subprocess.Popen(["openssl", "x509", "-in", str(path), "-pubkey", "-noout"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p2 = subprocess.Popen(["openssl", "pkey", "-pubin", "-outform", "der"], stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p3 = subprocess.Popen(["openssl", "dgst", "-sha256", "-binary"], stdin=p2.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p4 = subprocess.Popen(["openssl", "enc", "-base64"], stdin=p3.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            if p1.stdout:
+                p1.stdout.close()
+            if p2.stdout:
+                p2.stdout.close()
+            if p3.stdout:
+                p3.stdout.close()
+            out, _ = p4.communicate(timeout=5)
+            if p4.returncode == 0:
+                return out.decode().strip()
+        except Exception as e:
+            logger.debug("计算证书 %s 公钥指纹失败: %s", path, e)
+        return None
+
     def get_self_signed_cert_info(self) -> dict[str, Any] | None:
         """获取当前自签名证书路径与指纹"""
         cert_path = self.self_signed_dir / "server.crt"
@@ -514,10 +537,12 @@ server {{
         if not (cert_path.is_file() and key_path.is_file()):
             return None
         fp = self.compute_cert_fingerprint(cert_path)
+        pin = self.compute_cert_pubkey_pin(cert_path)
         return {
             "cert_path": str(cert_path),
             "key_path": str(key_path),
             "fingerprint": fp,
+            "pubkey_pin": pin,
         }
 
     def ensure_self_signed_cert(self, host_or_ip: str = "127.0.0.1") -> tuple[Path, Path, str]:

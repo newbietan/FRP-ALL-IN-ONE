@@ -24,7 +24,8 @@ if not host:
     host = "127.0.0.1"
 
 cert, key, fp = tls_manager.ensure_self_signed_cert(host)
-print(f"export FRP_TLS_CERT=\"{cert}\"\nexport FRP_TLS_KEY=\"{key}\"\nexport FRP_TLS_FINGERPRINT=\"{fp}\"")
+pin = tls_manager.compute_cert_pubkey_pin(cert) or ""
+print(f"export FRP_TLS_CERT=\"{cert}\"\nexport FRP_TLS_KEY=\"{key}\"\nexport FRP_TLS_FINGERPRINT=\"{fp}\"\nexport FRP_TLS_PUBKEY_PIN=\"{pin}\"")
 ' 2>/dev/null || true)
         if [ -n "$TLS_VARS" ]; then
             eval "$TLS_VARS"

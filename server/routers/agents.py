@@ -191,11 +191,13 @@ async def get_websocket_stats(
 
 
 def _upgrade_command(client, request: Request, db: Session) -> dict:
-    from urllib.parse import urlencode
+    import os
+    from urllib.parse import urlencode, urlsplit
 
     from core.security import public_base_url, require_secure_transport
     from routers.clients import _build_client_agent_info
     from services.agent_upgrades import issue_grant
+    from services.tls_manager import tls_manager
 
     info = _build_client_agent_info(db, client.id)
     os_type = (info.get("os") or "linux").lower()
@@ -206,11 +208,42 @@ def _upgrade_command(client, request: Request, db: Session) -> dict:
     grant = issue_grant(db, client.id, target)
     query = urlencode({"client_id": client.id, "grant": grant})
     url = f"{base}/api/frp/agent/upgrade-script/{platform}?{query}"
+
+    pubkey_pin = os.environ.get("FRP_TLS_PUBKEY_PIN", "")
+    tls_fingerprint = os.environ.get("FRP_TLS_FINGERPRINT", "")
+    if os.environ.get("FRP_TLS_CERT"):
+        if not pubkey_pin:
+            pubkey_pin = tls_manager.compute_cert_pubkey_pin(os.environ["FRP_TLS_CERT"]) or ""
+        if not tls_fingerprint:
+            tls_fingerprint = tls_manager.compute_cert_fingerprint(os.environ["FRP_TLS_CERT"]) or ""
+    if not (pubkey_pin and tls_fingerprint):
+        self_signed = tls_manager.get_self_signed_cert_info()
+        if self_signed:
+            if not pubkey_pin:
+                pubkey_pin = self_signed.get("pubkey_pin") or ""
+            if not tls_fingerprint:
+                tls_fingerprint = self_signed.get("fingerprint") or ""
+
+    is_https = urlsplit(base).scheme == "https"
+
     if platform == "windows":
-        command = f"[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; & ([scriptblock]::Create((Invoke-RestMethod '{url}')))"
+        if is_https and tls_fingerprint:
+            win_cb = (
+                f"[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{"
+                f" param($s, $c, $ch, $e); if ($e -eq [System.Net.Security.SslPolicyErrors]::None) {{ return $true }};"
+                f" if ($c) {{ $h = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-','').ToLower();"
+                f" if ($h -eq '{tls_fingerprint}') {{ return $true }} }}; return $false }}; "
+            )
+        else:
+            win_cb = ""
+        command = f"{win_cb}& ([scriptblock]::Create((Invoke-RestMethod '{url}')))"
     else:
         runner = "bash" if platform == "darwin" else "sudo bash"
-        command = f"curl -kfsSL '{url}' -o /tmp/frp-client-upgrade.sh && {runner} /tmp/frp-client-upgrade.sh"
+        if is_https and pubkey_pin:
+            curl_cmd = f'curl -kfsSL --pinnedpubkey "sha256//{pubkey_pin}"'
+        else:
+            curl_cmd = "curl -fsSL"
+        command = f"{curl_cmd} '{url}' -o /tmp/frp-client-upgrade.sh && {runner} /tmp/frp-client-upgrade.sh"
     return {"upgrade_command": command, "target_version": target, "expires_in": 600}
 
 

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Shared transport and public-origin policy for credential-bearing endpoints."""
 from __future__ import annotations
 

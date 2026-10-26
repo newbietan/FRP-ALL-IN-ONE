@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 客户端和隧道管理路由
 """

@@ -31,8 +31,11 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
       } else if (token.startsWith('[') && token.includes('](')) {
         const linkMatch = token.match(/\[([^\]]+)\]\(([^)]+)\)/);
         if (linkMatch) {
+          const rawHref = linkMatch[2].trim();
+          const isSafe = /^(https?:\/\/|\/|#)/i.test(rawHref);
+          const safeHref = isSafe ? rawHref : '#';
           parts.push(
-            <a key={match.index} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">
+            <a key={match.index} href={safeHref} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">
               {linkMatch[1]}
             </a>
           );

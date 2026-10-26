@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 FRP Manager API - 主入口
 精简后的主文件，仅保留 WebSocket 和初始化逻辑
@@ -96,7 +97,7 @@ def init_database():
     """初始化数据库表并启动核心服务"""
     models.Base.metadata.create_all(bind=engine)
     _auto_migrate_db(engine)
-    print("[OK] 数据库初始化完成。首个 GitHub 登录的用户将自动成为管理员。")
+    print("[OK] 数据库初始化完成。首个登录用户必须匹配预设的 INITIAL_ADMIN 身份。")
 
     # 首次启动自适应初始化：如果数据库尚未初始化，根据环境变量或公网 IP 自动生成基础配置并就绪，免除前端二次向导
     asyncio.create_task(_auto_init_frps_if_needed())

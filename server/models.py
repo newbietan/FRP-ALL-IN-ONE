@@ -1,10 +1,11 @@
+# pyright: reportMissingImports=false
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import enum
 import os
 
-from sqlalchemy import (
+from sqlalchemy import (  # type: ignore
     BigInteger,
     Boolean,
     DateTime,
@@ -14,11 +15,11 @@ from sqlalchemy import (
     Integer,
     String,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship  # type: ignore
 
 from database import Base
 
-APP_VERSION = os.environ.get("APP_VERSION", "3.3.1")
+APP_VERSION = os.environ.get("APP_VERSION", "3.3.2")
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 

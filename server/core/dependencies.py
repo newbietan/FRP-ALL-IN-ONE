@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 FastAPI 依赖项
 包含数据库会话、用户认证等

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 版本检测服务
 负责定期或按需检测 GitHub Releases 最新版本并进行语义化对比

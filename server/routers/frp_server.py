@@ -352,19 +352,58 @@ async def get_agent_install_command(
 ):
     """
     获取客户端一键拉取并执行的部署命令（无需预先创建设备）
-    仅生成命令信息，绝不向数据库提前写入任何客户端记录，彻底杜绝幽灵设备
+    仅生成命令信息，绝不向数据库提前写入任何客户端记录，彻底杜绝幽灵设备。
+    自签名证书下自动注入公钥与证书指纹锁定（Pinning），抵御中间人攻击。
     """
     require_secure_transport(request)
     base_url = public_base_url(request, db)
     install_key = _get_or_create_install_token(db)
 
+    # 提取证书指纹与公钥 Pin，供客户端初次拉取时执行严格的证书/公钥锁定校验，杜绝中间人篡改
+    pubkey_pin = os.environ.get("FRP_TLS_PUBKEY_PIN", "")
+    tls_fingerprint = os.environ.get("FRP_TLS_FINGERPRINT", "")
+    from services.tls_manager import tls_manager
+    if os.environ.get("FRP_TLS_CERT"):
+        if not pubkey_pin:
+            pubkey_pin = tls_manager.compute_cert_pubkey_pin(os.environ["FRP_TLS_CERT"]) or ""
+        if not tls_fingerprint:
+            tls_fingerprint = tls_manager.compute_cert_fingerprint(os.environ["FRP_TLS_CERT"]) or ""
+    if not (pubkey_pin and tls_fingerprint):
+        self_signed = tls_manager.get_self_signed_cert_info()
+        if self_signed:
+            if not pubkey_pin:
+                pubkey_pin = self_signed.get("pubkey_pin") or ""
+            if not tls_fingerprint:
+                tls_fingerprint = self_signed.get("fingerprint") or ""
+
+    from urllib.parse import urlsplit
+    parsed = urlsplit(base_url)
+    is_https = parsed.scheme == "https"
+
+    if is_https and pubkey_pin:
+        curl_cmd = f'curl -kfsSL --pinnedpubkey "sha256//{pubkey_pin}"'
+    else:
+        curl_cmd = "curl -fsSL"
+
+    if is_https and tls_fingerprint:
+        win_cb = (
+            f"[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{"
+            f" param($s, $c, $ch, $e); if ($e -eq [System.Net.Security.SslPolicyErrors]::None) {{ return $true }};"
+            f" if ($c) {{ $h = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($c.GetRawCertData())).Replace('-','').ToLower();"
+            f" if ($h -eq '{tls_fingerprint}') {{ return $true }} }}; return $false }}; "
+        )
+    else:
+        win_cb = ""
+
     return {
         "install_key": install_key,
         "base_url": base_url,
+        "tls_fingerprint": tls_fingerprint,
+        "pubkey_pin": pubkey_pin,
         "commands": {
-            "linux": f"curl -kfsSL '{base_url}/api/frp/agent/install/linux?key={install_key}' | sudo bash",
-            "darwin": f"curl -kfsSL '{base_url}/api/frp/agent/install/darwin?key={install_key}' | bash",
-            "windows": f"[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; & ([scriptblock]::Create((Invoke-RestMethod '{base_url}/api/frp/agent/install/windows?key={install_key}')))"
+            "linux": f"{curl_cmd} '{base_url}/api/frp/agent/install/linux?key={install_key}' | sudo bash",
+            "darwin": f"{curl_cmd} '{base_url}/api/frp/agent/install/darwin?key={install_key}' | bash",
+            "windows": f"{win_cb}& ([scriptblock]::Create((Invoke-RestMethod '{base_url}/api/frp/agent/install/windows?key={install_key}')))"
         }
     }
 
@@ -442,16 +481,7 @@ async def _serve_agent_install_script(
             if self_signed:
                 tls_fingerprint = self_signed.get("fingerprint") or ""
 
-    import ipaddress
-    is_ip = False
-    with contextlib.suppress(ValueError):
-        ipaddress.ip_address(public_url.hostname or "")
-        is_ip = True
-
-    insecure_tls = (
-        os.environ.get("FRP_AGENT_INSECURE_TLS") == "1"
-        or (ws_scheme == "wss" and not tls_fingerprint and is_ip)
-    )
+    insecure_tls = os.environ.get("FRP_AGENT_INSECURE_TLS") == "1"
 
     if platform == "windows":
         script = _generate_windows_script(server_ip, frps_port, auth_token, client_id, client_token, ws_scheme, manager_host, target_version, upgrade_job_id, tls_fingerprint=tls_fingerprint, insecure_tls=insecure_tls)

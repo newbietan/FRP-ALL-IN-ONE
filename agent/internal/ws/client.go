@@ -162,6 +162,8 @@ func (c *Client) connect() error {
 					}
 					return nil
 				}
+			} else {
+				log.Printf("[WARN] [Security] TLS 证书未指定指纹校验 (fp='')，已按 FRP_AGENT_INSECURE_TLS 跳过证书链校验，存在中间人劫持风险！强烈建议配置证书指纹。")
 			}
 		}
 		dialer.TLSClientConfig = tlsConfig

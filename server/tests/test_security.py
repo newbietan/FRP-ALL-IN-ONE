@@ -312,19 +312,38 @@ def test_websocket_and_http_reject_wrong_purpose_and_nonexpiring_tokens(client, 
         assert client.get("/api/auth/profile", headers={"Authorization": "Bearer " + token}).status_code == 401
 
 
-def test_install_command_supports_self_signed_tls(client, db):
+def test_install_command_supports_self_signed_tls(client, db, monkeypatch):
     admin = administrator(db)
     token = access_token(admin)
+
+    # 1. 自签名证书场景：严格注入公钥 Pin 与指纹锁定校验
+    monkeypatch.setenv("FRP_TLS_PUBKEY_PIN", "pin123")
+    monkeypatch.setenv("FRP_TLS_FINGERPRINT", "fp123")
     response = client.get("/api/frp/agent/install-command", headers={"Authorization": "Bearer " + token})
     assert response.status_code == 200
     data = response.json()
     assert "commands" in data
-    assert data["commands"]["linux"].startswith("curl -kfsSL '")
+    assert data["commands"]["linux"].startswith('curl -kfsSL --pinnedpubkey "sha256//pin123"')
     assert data["commands"]["linux"].endswith("' | sudo bash")
-    assert data["commands"]["darwin"].startswith("curl -kfsSL '")
+    assert data["commands"]["darwin"].startswith('curl -kfsSL --pinnedpubkey "sha256//pin123"')
     assert data["commands"]["darwin"].endswith("' | bash")
     assert "ServerCertificateValidationCallback" in data["commands"]["windows"]
+    assert "fp123" in data["commands"]["windows"]
     assert "Invoke-RestMethod" in data["commands"]["windows"]
+
+    # 2. 标准 CA 证书场景：严格标准校验，严禁使用 -k 或绕过 CA
+    monkeypatch.delenv("FRP_TLS_PUBKEY_PIN", raising=False)
+    monkeypatch.delenv("FRP_TLS_FINGERPRINT", raising=False)
+    monkeypatch.delenv("FRP_TLS_CERT", raising=False)
+    from services.tls_manager import tls_manager
+    monkeypatch.setattr(tls_manager, "get_self_signed_cert_info", lambda: None)
+    response2 = client.get("/api/frp/agent/install-command", headers={"Authorization": "Bearer " + token})
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["commands"]["linux"].startswith("curl -fsSL '")
+    assert "--pinnedpubkey" not in data2["commands"]["linux"]
+    assert "-k" not in data2["commands"]["linux"]
+    assert "ServerCertificateValidationCallback" not in data2["commands"]["windows"]
 
 
 def test_generate_script_insecure_tls_and_fingerprint():

@@ -778,6 +778,24 @@ export default function App() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [upgradeTargetDevice?.id]);
 
+  // 当客户端升级成功后，自动提示并平滑关闭升级弹窗，同时重新加载客户端列表
+  useEffect(() => {
+    const id = upgradeTargetDevice?.id;
+    if (!id) return;
+    const taskStatus = agentUpgradeStatuses[id]?.status;
+    if (taskStatus === 'succeeded') {
+      triggerToast(
+        t(`客户端设备「${upgradeTargetDevice.name}」升级成功！`, `Client "${upgradeTargetDevice.name}" upgraded successfully!`),
+        'success'
+      );
+      const timer = setTimeout(() => {
+        setUpgradeTargetDevice(null);
+        void loadDashboardData();
+      }, 1800);
+      return () => clearTimeout(timer);
+    }
+  }, [upgradeTargetDevice?.id, agentUpgradeStatuses[upgradeTargetDevice?.id || '']?.status]);
+
   const handleTriggerServerUpgrade = () => {
     if (isUpgradingServer) return;
     showConfirm({
@@ -3806,15 +3824,23 @@ export default function App() {
 
                 <button
                   onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
-                  disabled={upgradingDevice || upgradeTargetDevice.status !== 'online' || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)}
+                  disabled={upgradingDevice || upgradeTargetDevice.status !== 'online' || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status) || agentUpgradeStatuses[upgradeTargetDevice.id]?.status === 'succeeded'}
                   className={`w-full py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    upgradeTargetDevice.status === 'online' && !upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)
+                    agentUpgradeStatuses[upgradeTargetDevice.id]?.status === 'succeeded'
+                      ? 'bg-emerald-600 text-white cursor-default'
+                      : upgradeTargetDevice.status === 'online' && !upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)
                       ? 'bg-primary hover:bg-[#005166] text-white'
                       : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>{upgradingDevice || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status) ? t('执行中...', 'In Progress...') : t('发送远程升级信号', 'Send Upgrade Signal')}</span>
+                  <span>
+                    {agentUpgradeStatuses[upgradeTargetDevice.id]?.status === 'succeeded'
+                      ? t('✓ 升级成功，窗口即将自动关闭...', '✓ Upgraded successfully, closing automatically...')
+                      : upgradingDevice || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)
+                      ? t('执行中...', 'In Progress...')
+                      : t('发送远程升级信号', 'Send Upgrade Signal')}
+                  </span>
                 </button>
 
                 <div className="text-[10px] text-slate-500 bg-white/70 p-2 rounded border border-slate-200/80 leading-normal">

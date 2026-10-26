@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """
 系统状态相关路由
 """
