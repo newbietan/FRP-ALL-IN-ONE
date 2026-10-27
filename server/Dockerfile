@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
 
 # ---- 阶段 3: Python 运行环境与整体组装 ----
 FROM python:3.11-slim
-ARG APP_VERSION=3.3.3
+ARG APP_VERSION=3.3.4
 ENV APP_VERSION=${APP_VERSION}
 LABEL io.frp-all-in-one.version="v${APP_VERSION}" \
       io.frp-all-in-one.role="server" \

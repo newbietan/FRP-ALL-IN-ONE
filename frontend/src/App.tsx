@@ -406,7 +406,7 @@ export default function App() {
               uploadRate: old.uploadRate ?? fresh.uploadRate,
               downloadRate: old.downloadRate ?? fresh.downloadRate,
               totalTraffic: old.totalTraffic ?? fresh.totalTraffic,
-              agentInfo: old.agentInfo ? { ...fresh.agentInfo, ...old.agentInfo } : fresh.agentInfo,
+              agentInfo: old.agentInfo ? { ...old.agentInfo, ...fresh.agentInfo } : fresh.agentInfo,
             };
           });
         });
@@ -508,6 +508,10 @@ export default function App() {
           ...prev,
           [data.client_id]: data.data,
         }));
+        // 若升级任务已成功，立即触发数据同步以更新设备版本
+        if (data.data.status === 'succeeded') {
+          void loadDashboardData();
+        }
       }
     };
     dashboardWs.on('agent_upgrade_status', handleAgentUpgradeStatus);
@@ -790,21 +794,24 @@ export default function App() {
     const task = agentUpgradeStatuses[id];
     if (!task || task.status !== 'succeeded') return;
 
+    // 获取当前实时的最新设备数据
+    const liveDevice = devices.find(d => d.id === id) || upgradeTargetDevice;
+
     // 1. 目标版本校验：任务的目标版本必须与当前所需升级的目标版本严格一致
-    const currentTargetVer = (upgradeTargetDevice.latestVersion || APP_VERSION_DISPLAY).replace(/^v/i, '');
+    const currentTargetVer = (liveDevice.latestVersion || APP_VERSION_DISPLAY).replace(/^v/i, '');
     const taskTargetVer = (task.target_version || '').replace(/^v/i, '');
     if (!taskTargetVer || !currentTargetVer || taskTargetVer !== currentTargetVer) {
       return; // 属于旧版本的历史记录，忽略
     }
 
-    // 2. 真实版本校验：客户端上报的当前版本必须已经等于目标版本，确保客户端已经真正完成重启与新版本注册
-    const clientVer = (upgradeTargetDevice.agentInfo?.agent_version || '').replace(/^v/i, '');
+    // 2. 真实版本校验：客户端实际在线上报的版本已达到目标版本时，才判定为真正完成
+    const clientVer = (liveDevice.agentInfo?.agent_version || '').replace(/^v/i, '');
     if (clientVer && currentTargetVer && clientVer !== currentTargetVer) {
       return; // 客户端尚未完成新版本启动上报，不能提前关闭弹窗
     }
 
     triggerToast(
-      t(`客户端设备「${upgradeTargetDevice.name}」升级成功！`, `Client "${upgradeTargetDevice.name}" upgraded successfully!`),
+      t(`客户端设备「${liveDevice.name}」升级成功！`, `Client "${liveDevice.name}" upgraded successfully!`),
       'success'
     );
     const timer = setTimeout(() => {
@@ -814,9 +821,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [
     upgradeTargetDevice?.id,
-    upgradeTargetDevice?.agentInfo?.agent_version,
-    agentUpgradeStatuses[upgradeTargetDevice?.id || '']?.status,
-    agentUpgradeStatuses[upgradeTargetDevice?.id || '']?.target_version,
+    devices,
+    agentUpgradeStatuses,
   ]);
 
   const handleTriggerServerUpgrade = () => {
@@ -3843,7 +3849,9 @@ export default function App() {
 
       {/* INDIVIDUAL CLIENT DEVICE UPGRADE MODAL */}
       <AnimatePresence>
-        {upgradeTargetDevice && (
+        {upgradeTargetDevice && (() => {
+          const liveDevice = devices.find(d => d.id === upgradeTargetDevice.id) || upgradeTargetDevice;
+          return (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -3860,7 +3868,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <ArrowUpCircle className="w-5 h-5 text-primary" />
                   <h3 className="font-headline font-bold text-sm text-on-surface">
-                    {t(`升级客户端设备: ${upgradeTargetDevice.name}`, `Upgrade Client: ${upgradeTargetDevice.name}`)}
+                    {t(`升级客户端设备: ${liveDevice.name}`, `Upgrade Client: ${liveDevice.name}`)}
                   </h3>
                 </div>
                 <button 
@@ -3875,22 +3883,22 @@ export default function App() {
                 <div>
                   <span className="text-slate-400">{t('当前版本: ', 'Current: ')}</span>
                   <span className="font-semibold text-slate-800">
-                    {upgradeTargetDevice.agentInfo?.agent_version ? `v${upgradeTargetDevice.agentInfo.agent_version}` : 'v3.0.0'}
+                    {liveDevice.agentInfo?.agent_version ? `v${liveDevice.agentInfo.agent_version}` : 'v3.0.0'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400">{t('目标版本: ', 'Target: ')}</span>
                   <span className="font-semibold text-emerald-600">
-                    {upgradeTargetDevice.latestVersion || APP_VERSION_DISPLAY}
+                    {liveDevice.latestVersion || APP_VERSION_DISPLAY}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400">{t('宿主机 IP: ', 'Host IP: ')}</span>
-                  <span className="font-semibold text-slate-800">{upgradeTargetDevice.ip}</span>
+                  <span className="font-semibold text-slate-800">{liveDevice.ip}</span>
                 </div>
                 <div>
                   <span className="text-slate-400">{t('运行环境: ', 'Platform: ')}</span>
-                  <span className="font-semibold text-slate-800 capitalize">{upgradeTargetDevice.os}</span>
+                  <span className="font-semibold text-slate-800 capitalize">{liveDevice.os}</span>
                 </div>
               </div>
 
@@ -3909,10 +3917,10 @@ export default function App() {
                 </p>
 
                 {(() => {
-                  const targetVerNorm = (upgradeTargetDevice.latestVersion || APP_VERSION_DISPLAY).replace(/^v/i, '');
-                  const rawTask = agentUpgradeStatuses[upgradeTargetDevice.id];
+                  const targetVerNorm = (liveDevice.latestVersion || APP_VERSION_DISPLAY).replace(/^v/i, '');
+                  const rawTask = agentUpgradeStatuses[liveDevice.id];
                   const taskVerNorm = (rawTask?.target_version || '').replace(/^v/i, '');
-                  const clientVerNorm = (upgradeTargetDevice.agentInfo?.agent_version || '').replace(/^v/i, '');
+                  const clientVerNorm = (liveDevice.agentInfo?.agent_version || '').replace(/^v/i, '');
                   // 历史遗留的已完成旧任务不应显示在当前待升级弹窗中
                   const isStale = rawTask && (
                     (taskVerNorm && targetVerNorm && taskVerNorm !== targetVerNorm) ||
@@ -3949,12 +3957,12 @@ export default function App() {
                       )}
 
                       <button
-                        onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
-                        disabled={upgradingDevice || upgradeTargetDevice.status !== 'online' || upgradeBusy(currentTask?.status) || currentTask?.status === 'succeeded'}
+                        onClick={() => handleUpgradeSingleAgent(liveDevice)}
+                        disabled={upgradingDevice || liveDevice.status !== 'online' || upgradeBusy(currentTask?.status) || currentTask?.status === 'succeeded'}
                         className={`w-full py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                           currentTask?.status === 'succeeded'
                             ? 'bg-emerald-600 text-white cursor-default'
-                            : upgradeTargetDevice.status === 'online' && !upgradeBusy(currentTask?.status)
+                            : liveDevice.status === 'online' && !upgradeBusy(currentTask?.status)
                             ? 'bg-primary hover:bg-[#005166] text-white'
                             : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                         }`}
@@ -3989,7 +3997,7 @@ export default function App() {
                   {t('生成单次有效且受限的安全升级命令（10分钟有效），自动校验镜像并平滑重建容器，完整保留已有隧道配置', 'Generates a single-use bounded upgrade command (10m validity), pulling verified images and preserving tunnels')}
                 </p>
                 {(() => {
-                  const cmdEntry = agentUpgradeCommands[upgradeTargetDevice.id];
+                  const cmdEntry = agentUpgradeCommands[liveDevice.id];
                   const hasValidCmd = cmdEntry && cmdEntry.expiresAt > Date.now();
 
                   if (hasValidCmd) {
@@ -4010,7 +4018,7 @@ export default function App() {
                         <div className="flex justify-between items-center text-[10px] text-slate-500">
                           <span>{t('有效时间至: ', 'Expires at: ')}{new Date(cmdEntry.expiresAt).toLocaleTimeString()}</span>
                           <button
-                            onClick={() => handleGenerateUpgradeCommand(upgradeTargetDevice.id)}
+                            onClick={() => handleGenerateUpgradeCommand(liveDevice.id)}
                             disabled={generatingUpgradeCommand}
                             className="text-primary hover:underline cursor-pointer"
                           >
@@ -4023,7 +4031,7 @@ export default function App() {
 
                   return (
                     <button
-                      onClick={() => handleGenerateUpgradeCommand(upgradeTargetDevice.id)}
+                      onClick={() => handleGenerateUpgradeCommand(liveDevice.id)}
                       disabled={generatingUpgradeCommand}
                       className="w-full py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
                     >
@@ -4044,7 +4052,8 @@ export default function App() {
               </div>
             </motion.div>
           </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* GLOBAL UNIFIED CONFIRMATION MODAL */}

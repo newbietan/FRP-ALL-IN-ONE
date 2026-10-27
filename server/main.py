@@ -526,8 +526,15 @@ async def _handle_agent_message(client_id: str, msg: dict):
             db.close()
         # Every registration/reconnection reconciles the authoritative tunnel config.
         # Agent skips byte-identical configurations, avoiding needless restarts.
-        from routers.clients import _push_config_for_client
+        from routers.clients import _broadcast_dashboard_sync, _push_config_for_client
         await _push_config_for_client(client_id)
+
+        # 客户端注册或重连（如升级重启就绪）后，即时向所有 Web 控制台广播最新设备数据与版本
+        db_sync = SessionLocal()
+        try:
+            await _broadcast_dashboard_sync(db_sync)
+        finally:
+            db_sync.close()
 
     elif msg_type == "system_info":
         if not isinstance(data, dict):
@@ -623,6 +630,13 @@ async def _handle_agent_message(client_id: str, msg: dict):
             await ws_manager.broadcast_dashboard({
                 "type": "agent_upgrade_status", "client_id": client_id, "data": task,
             })
+            if task.get("status") == "succeeded":
+                from routers.clients import _broadcast_dashboard_sync
+                db_sync = SessionLocal()
+                try:
+                    await _broadcast_dashboard_sync(db_sync)
+                finally:
+                    db_sync.close()
 
     elif msg_type == "frpc_status":
         db = SessionLocal()
