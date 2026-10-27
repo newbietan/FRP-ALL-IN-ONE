@@ -294,8 +294,25 @@ async def get_agent_upgrade_status_endpoint(
     client_id: str, db: Session = Depends(get_db),
     current_user: models.Admin = Depends(get_current_user)
 ):
+    from routers.clients import _build_client_agent_info
     from services.agent_upgrades import get_task
-    return {"client_id": client_id, "status": get_task(db, client_id)}
+
+    task = get_task(db, client_id)
+    if task:
+        info = _build_client_agent_info(db, client_id)
+        current_agent_ver = (info.get("agent_version") or info.get("version") or "").lstrip("v")
+        target_ver = (task.get("target_version") or "").lstrip("v")
+        server_ver = models.APP_VERSION.lstrip("v")
+        # 若客户端版本落后于服务端，且记录的任务针对的是旧目标版本（如上次升级历史记录），
+        # 则该历史完成态任务已失效，不应作为当前版本的升级状态返回
+        if (
+            current_agent_ver
+            and models.is_newer_version(f"v{server_ver}", f"v{current_agent_ver}")
+            and task.get("status") in {"succeeded", "failed", "rolled_back", "rollback_failed"}
+            and target_ver != server_ver
+        ):
+            task = None
+    return {"client_id": client_id, "status": task}
 
 
 @router.post("/batch-upgrade")

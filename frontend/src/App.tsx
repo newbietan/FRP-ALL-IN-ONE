@@ -300,9 +300,14 @@ export default function App() {
     deviceId: devices[0]?.id || ''
   });
 
-  // ===========================
-  // OAuth 回调处理 & 初始化数据加载
-  // ===========================
+  const openUpgradeModal = (device: Device) => {
+    setAgentUpgradeStatuses(prev => {
+      const next = { ...prev };
+      delete next[device.id];
+      return next;
+    });
+    setUpgradeTargetDevice(device);
+  };
   // 检查系统状态并跳转到对应页面，同时预加载公网 IP
   const checkSystemAndNavigate = async () => {
     // 1. 如果已有 Token，先验证 Token 是否合法有效（防止历史残留无效 Token）
@@ -782,19 +787,37 @@ export default function App() {
   useEffect(() => {
     const id = upgradeTargetDevice?.id;
     if (!id) return;
-    const taskStatus = agentUpgradeStatuses[id]?.status;
-    if (taskStatus === 'succeeded') {
-      triggerToast(
-        t(`客户端设备「${upgradeTargetDevice.name}」升级成功！`, `Client "${upgradeTargetDevice.name}" upgraded successfully!`),
-        'success'
-      );
-      const timer = setTimeout(() => {
-        setUpgradeTargetDevice(null);
-        void loadDashboardData();
-      }, 1800);
-      return () => clearTimeout(timer);
+    const task = agentUpgradeStatuses[id];
+    if (!task || task.status !== 'succeeded') return;
+
+    // 1. 目标版本校验：任务的目标版本必须与当前所需升级的目标版本严格一致
+    const currentTargetVer = (upgradeTargetDevice.latestVersion || APP_VERSION_DISPLAY).replace(/^v/i, '');
+    const taskTargetVer = (task.target_version || '').replace(/^v/i, '');
+    if (!taskTargetVer || !currentTargetVer || taskTargetVer !== currentTargetVer) {
+      return; // 属于旧版本的历史记录，忽略
     }
-  }, [upgradeTargetDevice?.id, agentUpgradeStatuses[upgradeTargetDevice?.id || '']?.status]);
+
+    // 2. 真实版本校验：客户端上报的当前版本必须已经等于目标版本，确保客户端已经真正完成重启与新版本注册
+    const clientVer = (upgradeTargetDevice.agentInfo?.agent_version || '').replace(/^v/i, '');
+    if (clientVer && currentTargetVer && clientVer !== currentTargetVer) {
+      return; // 客户端尚未完成新版本启动上报，不能提前关闭弹窗
+    }
+
+    triggerToast(
+      t(`客户端设备「${upgradeTargetDevice.name}」升级成功！`, `Client "${upgradeTargetDevice.name}" upgraded successfully!`),
+      'success'
+    );
+    const timer = setTimeout(() => {
+      setUpgradeTargetDevice(null);
+      void loadDashboardData();
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [
+    upgradeTargetDevice?.id,
+    upgradeTargetDevice?.agentInfo?.agent_version,
+    agentUpgradeStatuses[upgradeTargetDevice?.id || '']?.status,
+    agentUpgradeStatuses[upgradeTargetDevice?.id || '']?.target_version,
+  ]);
 
   const handleTriggerServerUpgrade = () => {
     if (isUpgradingServer) return;
@@ -833,9 +856,18 @@ export default function App() {
     try {
       setUpgradingDevice(true);
       const result = await agentsApi.upgrade(device.id);
-      // Read the real task; a successful socket write is not an acknowledgment.
-      const state = await agentsApi.getUpgradeStatus(device.id);
-      if (state.status) setAgentUpgradeStatuses(prev => ({ ...prev, [device.id]: state.status! }));
+      // 仅在成功下发升级信号时才更新任务状态；避免未发送时读取到历史已完成任务
+      if (result.signal_sent) {
+        const state = await agentsApi.getUpgradeStatus(device.id);
+        if (state.status) setAgentUpgradeStatuses(prev => ({ ...prev, [device.id]: state.status! }));
+      } else {
+        // 未能发送信号（未挂载 Socket 或老版本），清除历史完成状态
+        setAgentUpgradeStatuses(prev => {
+          const next = { ...prev };
+          delete next[device.id];
+          return next;
+        });
+      }
       if (result.upgrade_command) {
         setAgentUpgradeCommands(prev => ({ ...prev, [device.id]: { command: result.upgrade_command!, expiresAt: Date.now() + 600000 } }));
       }
@@ -2294,7 +2326,7 @@ export default function App() {
                                               <span
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  setUpgradeTargetDevice(device);
+                                                  openUpgradeModal(device);
                                                 }}
                                                 className="text-[9px] bg-amber-50 text-amber-700 border border-amber-300 px-1.5 py-0.5 rounded font-mono font-semibold flex items-center gap-1 cursor-pointer hover:bg-amber-100 transition-colors"
                                                 title={t('客户端版本可升级，点击查看升级方式', 'Client update available, click to view')}
@@ -2353,7 +2385,7 @@ export default function App() {
                                           <div className="flex justify-end gap-1.5">
                                             {device.hasUpdate && (
                                               <button
-                                                onClick={() => setUpgradeTargetDevice(device)}
+                                                onClick={() => openUpgradeModal(device)}
                                                 className="p-1 px-1.5 text-amber-600 hover:text-amber-700 rounded hover:bg-amber-50 transition-colors cursor-pointer"
                                                 title={t('升级此客户端 Agent', 'Upgrade Client Agent')}
                                               >
@@ -3876,52 +3908,69 @@ export default function App() {
                   {t('通过 WebSocket 向正在运行的 Agent 容器发送更新请求', 'Send update signal over WebSocket to the running agent')}
                 </p>
 
-                {/* 客户端实时回传反馈卡片 */}
-                {agentUpgradeStatuses[upgradeTargetDevice.id] && (
-                  <div className="p-2.5 bg-white border border-sky-300 rounded-lg flex flex-col gap-1 text-xs shadow-sm">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-semibold text-sky-900 flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id].status) ? 'bg-amber-500 animate-pulse' : upgradeFailed(agentUpgradeStatuses[upgradeTargetDevice.id].status) ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                        <span>{t('客户端反馈: ', 'Agent Feedback: ')}</span>
-                        <span className="text-emerald-700 font-mono font-bold">
-                          {agentUpgradeStatuses[upgradeTargetDevice.id].status}
-                        </span>
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {upgradeTimestamp(agentUpgradeStatuses[upgradeTargetDevice.id].updated_at)}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-700 bg-slate-50 p-1.5 rounded font-mono">
-                      {agentUpgradeStatuses[upgradeTargetDevice.id].message || t('客户端已接收升级指令', 'Agent received upgrade command')}
-                    </p>
-                    {agentUpgradeStatuses[upgradeTargetDevice.id].error && (
-                      <p className="text-[10px] text-rose-600 bg-rose-50 p-1.5 rounded font-mono">
-                        {agentUpgradeStatuses[upgradeTargetDevice.id].error}
-                      </p>
-                    )}
-                  </div>
-                )}
+                {(() => {
+                  const targetVerNorm = (upgradeTargetDevice.latestVersion || APP_VERSION_DISPLAY).replace(/^v/i, '');
+                  const rawTask = agentUpgradeStatuses[upgradeTargetDevice.id];
+                  const taskVerNorm = (rawTask?.target_version || '').replace(/^v/i, '');
+                  const clientVerNorm = (upgradeTargetDevice.agentInfo?.agent_version || '').replace(/^v/i, '');
+                  // 历史遗留的已完成旧任务不应显示在当前待升级弹窗中
+                  const isStale = rawTask && (
+                    (taskVerNorm && targetVerNorm && taskVerNorm !== targetVerNorm) ||
+                    (rawTask.status === 'succeeded' && clientVerNorm && targetVerNorm && clientVerNorm !== targetVerNorm)
+                  );
+                  const currentTask = isStale ? null : rawTask;
 
-                <button
-                  onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
-                  disabled={upgradingDevice || upgradeTargetDevice.status !== 'online' || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status) || agentUpgradeStatuses[upgradeTargetDevice.id]?.status === 'succeeded'}
-                  className={`w-full py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                    agentUpgradeStatuses[upgradeTargetDevice.id]?.status === 'succeeded'
-                      ? 'bg-emerald-600 text-white cursor-default'
-                      : upgradeTargetDevice.status === 'online' && !upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)
-                      ? 'bg-primary hover:bg-[#005166] text-white'
-                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>
-                    {agentUpgradeStatuses[upgradeTargetDevice.id]?.status === 'succeeded'
-                      ? t('✓ 升级成功，窗口即将自动关闭...', '✓ Upgraded successfully, closing automatically...')
-                      : upgradingDevice || upgradeBusy(agentUpgradeStatuses[upgradeTargetDevice.id]?.status)
-                      ? t('执行中...', 'In Progress...')
-                      : t('发送远程升级信号', 'Send Upgrade Signal')}
-                  </span>
-                </button>
+                  return (
+                    <>
+                      {/* 客户端实时回传反馈卡片 */}
+                      {currentTask && (
+                        <div className="p-2.5 bg-white border border-sky-300 rounded-lg flex flex-col gap-1 text-xs shadow-sm">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-sky-900 flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${upgradeBusy(currentTask.status) ? 'bg-amber-500 animate-pulse' : upgradeFailed(currentTask.status) ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                              <span>{t('客户端反馈: ', 'Agent Feedback: ')}</span>
+                              <span className="text-emerald-700 font-mono font-bold">
+                                {currentTask.status}
+                              </span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {upgradeTimestamp(currentTask.updated_at)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-700 bg-slate-50 p-1.5 rounded font-mono">
+                            {currentTask.message || t('客户端已接收升级指令', 'Agent received upgrade command')}
+                          </p>
+                          {currentTask.error && (
+                            <p className="text-[10px] text-rose-600 bg-rose-50 p-1.5 rounded font-mono">
+                              {currentTask.error}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => handleUpgradeSingleAgent(upgradeTargetDevice)}
+                        disabled={upgradingDevice || upgradeTargetDevice.status !== 'online' || upgradeBusy(currentTask?.status) || currentTask?.status === 'succeeded'}
+                        className={`w-full py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                          currentTask?.status === 'succeeded'
+                            ? 'bg-emerald-600 text-white cursor-default'
+                            : upgradeTargetDevice.status === 'online' && !upgradeBusy(currentTask?.status)
+                            ? 'bg-primary hover:bg-[#005166] text-white'
+                            : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>
+                          {currentTask?.status === 'succeeded'
+                            ? t('✓ 升级成功，窗口即将自动关闭...', '✓ Upgraded successfully, closing automatically...')
+                            : upgradingDevice || upgradeBusy(currentTask?.status)
+                            ? t('执行中...', 'In Progress...')
+                            : t('发送远程升级信号', 'Send Upgrade Signal')}
+                        </span>
+                      </button>
+                    </>
+                  );
+                })()}
 
                 <div className="text-[10px] text-slate-500 bg-white/70 p-2 rounded border border-slate-200/80 leading-normal">
                   {t(
