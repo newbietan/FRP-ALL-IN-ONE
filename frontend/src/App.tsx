@@ -2417,11 +2417,12 @@ export default function App() {
                                                 </h4>
                                                 <button
                                                   onClick={() => {
-                                                    const targetIp = (device.ip && device.ip !== '未知') ? device.ip : '127.0.0.1';
+                                                    const isWinOrMac = device.os === 'windows' || device.os === 'darwin';
+                                                    const defaultLocalIp = isWinOrMac ? 'host.docker.internal' : '127.0.0.1';
                                                     setNewTunnelData(p => ({
                                                       ...p,
                                                       deviceId: device.id,
-                                                      localIp: targetIp,
+                                                      localIp: defaultLocalIp,
                                                       localPort: '',
                                                       remotePort: '',
                                                     }));
@@ -3220,6 +3221,7 @@ export default function App() {
           const modalSelectedDevice = devices.find(d => d.id === newTunnelData.deviceId) || devices[0];
           const modalDetectedHostIp = (modalSelectedDevice?.ip && modalSelectedDevice.ip !== '未知') ? modalSelectedDevice.ip : '';
           const modalCandidateIps = modalSelectedDevice?.ips || (modalDetectedHostIp ? [modalDetectedHostIp] : []);
+          const modalIsWinOrMac = modalSelectedDevice?.os === 'windows' || modalSelectedDevice?.os === 'darwin' || modalSelectedDevice?.agentInfo?.os === 'windows' || modalSelectedDevice?.agentInfo?.os === 'darwin';
 
           return (
             <motion.div
@@ -3256,11 +3258,12 @@ export default function App() {
                       onChange={(e) => {
                         const nextDevId = e.target.value;
                         const targetDev = devices.find(d => d.id === nextDevId);
-                        const targetIp = (targetDev?.ip && targetDev.ip !== '未知') ? targetDev.ip : '127.0.0.1';
+                        const isWinOrMac = targetDev?.os === 'windows' || targetDev?.os === 'darwin';
+                        const defaultLocalIp = isWinOrMac ? 'host.docker.internal' : '127.0.0.1';
                         setNewTunnelData(p => ({
                           ...p,
                           deviceId: nextDevId,
-                          localIp: (p.localIp === '127.0.0.1' || !p.localIp || devices.some(d => d.ip === p.localIp)) ? targetIp : p.localIp,
+                          localIp: (p.localIp === '127.0.0.1' || p.localIp === 'host.docker.internal' || !p.localIp || devices.some(d => d.ip === p.localIp)) ? defaultLocalIp : p.localIp,
                         }));
                       }}
                     >
@@ -3302,15 +3305,27 @@ export default function App() {
                   <div className="grid grid-cols-3 gap-3 font-mono text-xs">
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
-                        <label className="text-[10px] text-outline uppercase font-semibold">{t('内部局域网 IP', 'Local IP')}</label>
-                        {modalDetectedHostIp && newTunnelData.localIp !== modalDetectedHostIp && (
-                          <button
-                            type="button"
-                            onClick={() => setNewTunnelData(p => ({ ...p, localIp: modalDetectedHostIp }))}
-                            className="text-[10px] text-primary hover:underline font-sans cursor-pointer font-medium"
-                          >
-                            {t('填入宿主机 IP', 'Fill Host IP')}
-                          </button>
+                        <label className="text-[10px] text-outline uppercase font-semibold">{t('内部局域网 IP / 主机名', 'Local IP / Host')}</label>
+                        {modalIsWinOrMac ? (
+                          newTunnelData.localIp !== 'host.docker.internal' && (
+                            <button
+                              type="button"
+                              onClick={() => setNewTunnelData(p => ({ ...p, localIp: 'host.docker.internal' }))}
+                              className="text-[10px] text-primary hover:underline font-sans cursor-pointer font-medium"
+                            >
+                              {t('填入 host.docker.internal', 'Use host.docker.internal')}
+                            </button>
+                          )
+                        ) : (
+                          newTunnelData.localIp !== '127.0.0.1' && (
+                            <button
+                              type="button"
+                              onClick={() => setNewTunnelData(p => ({ ...p, localIp: '127.0.0.1' }))}
+                              className="text-[10px] text-primary hover:underline font-sans cursor-pointer font-medium"
+                            >
+                              {t('填入 127.0.0.1 (本机)', 'Use 127.0.0.1')}
+                            </button>
+                          )
                         )}
                       </div>
                       <input 
@@ -3318,7 +3333,7 @@ export default function App() {
                         className="w-full border border-slate-300 rounded-xl py-2 px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#006782]/20 focus:border-[#006782] font-mono bg-white shadow-sm text-slate-800"
                         value={newTunnelData.localIp}
                         onChange={(e) => setNewTunnelData(p => ({ ...p, localIp: e.target.value }))}
-                        placeholder={modalDetectedHostIp || "127.0.0.1"}
+                        placeholder={modalIsWinOrMac ? "host.docker.internal" : "127.0.0.1"}
                         required
                       />
                     </div>
@@ -3357,67 +3372,132 @@ export default function App() {
                   </div>
 
                   {/* 候选 IP 快捷选择徽章 */}
-                  {modalDetectedHostIp && (
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-sans -mt-1">
-                      <span className="text-slate-500 text-[10px]">{t('嗅探到宿主机候选 IP:', 'Detected Host Candidate IPs:')}</span>
+                  {/* 快捷候选 IP / 主机名选择徽章 */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-sans -mt-1">
+                    <span className="text-slate-500 text-[10px]">{t('快捷地址推荐:', 'Recommended Addresses:')}</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewTunnelData(p => ({ ...p, localIp: '127.0.0.1' }))}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                        newTunnelData.localIp === '127.0.0.1'
+                          ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                      title={t('Linux Host 模式直通宿主机自身，不受内网 IP 变动影响', 'Direct loopback to host in Linux Host mode, immune to LAN IP changes')}
+                    >
+                      127.0.0.1 {modalIsWinOrMac ? t('(容器内)', '(Container)') : t('(★ 本机推荐)', '(★ Host Rec)')}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewTunnelData(p => ({ ...p, localIp: 'host.docker.internal' }))}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                        newTunnelData.localIp === 'host.docker.internal'
+                          ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                      title={t('Docker 宿主机固定虚拟通信地址，不受内网 IP 变动影响', 'Docker virtual host gateway, immune to LAN IP changes')}
+                    >
+                      host.docker.internal {modalIsWinOrMac ? t('(★ 宿主机推荐)', '(★ Host Rec)') : t('(Docker网关)', '(Docker GW)')}
+                    </button>
+
+                    {modalDetectedHostIp && (
                       <button
                         type="button"
                         onClick={() => setNewTunnelData(p => ({ ...p, localIp: modalDetectedHostIp }))}
                         className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
                           newTunnelData.localIp === modalDetectedHostIp
                             ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
                         }`}
-                        title={t('推荐：客户端宿主机实际局域网 IP', 'Recommended: Client host LAN IP')}
+                        title={t('客户端当前局域网 IP，适合转发局域网内其他设备', 'Client current LAN IP, suitable for forwarding other LAN devices')}
                       >
-                        ★ {modalDetectedHostIp} {t('(宿主机)', '(Host)')}
+                        {modalDetectedHostIp} {t('(局域网其他设备)', '(Other LAN Device)')}
                       </button>
-                      {modalCandidateIps.filter(ip => ip !== modalDetectedHostIp && ip !== '127.0.0.1').map(ip => (
-                        <button
-                          key={ip}
-                          type="button"
-                          onClick={() => setNewTunnelData(p => ({ ...p, localIp: ip }))}
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
-                            newTunnelData.localIp === ip
-                              ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
-                              : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
-                          }`}
-                        >
-                          {ip}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                    )}
 
-                  {/* 容器网络隔离 127.0.0.1 踩坑提示卡片 */}
-                  {(newTunnelData.localIp === '127.0.0.1' || newTunnelData.localIp === 'localhost') && (
+                    {modalCandidateIps.filter(ip => ip !== modalDetectedHostIp && ip !== '127.0.0.1').map(ip => (
+                      <button
+                        key={ip}
+                        type="button"
+                        onClick={() => setNewTunnelData(p => ({ ...p, localIp: ip }))}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                          newTunnelData.localIp === ip
+                            ? 'bg-primary/10 text-primary border-primary/40 font-semibold'
+                            : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        {ip}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 针对 Windows/macOS Docker Desktop 的 127.0.0.1 提醒 */}
+                  {modalIsWinOrMac && (newTunnelData.localIp === '127.0.0.1' || newTunnelData.localIp === 'localhost') && (
                     <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800 flex flex-col gap-2 font-sans">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                         <div className="flex-1">
                           <p className="font-semibold text-amber-900 leading-tight">
-                            {t('容器网络提示：127.0.0.1 指向容器自身内部', 'Container Notice: 127.0.0.1 points inside container')}
+                            {t('Docker Desktop 提示：127.0.0.1 指向虚拟机内部', 'Docker Desktop Notice: 127.0.0.1 points inside VM')}
                           </p>
                           <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
                             {t(
-                              'frp-agent 运行在 Docker 容器中，容器内部通常没有 SSH 等服务。若需转发宿主机服务（如宿主机 SSH、Web 等），请填入宿主机的实际局域网 IP。',
-                              'frp-agent runs inside a container without SSH. To tunnel host services (like host SSH/Web), use the host LAN IP.'
+                              '当前客户端为 Windows/macOS 容器环境，127.0.0.1 指向 Docker 虚拟环境内部。若需转发宿主机本身的服务（如 SSH、Web 等），请使用 host.docker.internal，无论内网 IP 怎么变动都不会断连。',
+                              'Client is running on Windows/macOS Docker Desktop. 127.0.0.1 points inside the container VM. To tunnel host services, use host.docker.internal to stay immune to LAN IP changes.'
                             )}
                           </p>
                         </div>
                       </div>
-                      {modalDetectedHostIp && (
-                        <div className="flex items-center gap-2 pl-6">
-                          <button
-                            type="button"
-                            onClick={() => setNewTunnelData(p => ({ ...p, localIp: modalDetectedHostIp }))}
-                            className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium px-3 py-1 rounded cursor-pointer transition-colors shadow-sm"
-                          >
-                            {t(`一键填入宿主机 IP (${modalDetectedHostIp})`, `Fill Host IP (${modalDetectedHostIp})`)}
-                          </button>
-                          <span className="text-[10px] text-amber-600 font-semibold">{t('强烈推荐', 'Highly Recommended')}</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2 pl-6">
+                        <button
+                          type="button"
+                          onClick={() => setNewTunnelData(p => ({ ...p, localIp: 'host.docker.internal' }))}
+                          className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium px-3 py-1 rounded cursor-pointer transition-colors shadow-sm"
+                        >
+                          {t('一键填入 host.docker.internal', 'Fill host.docker.internal')}
+                        </button>
+                        <span className="text-[10px] text-amber-600 font-semibold">{t('强烈推荐', 'Highly Recommended')}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 针对 Linux Host 模式下 127.0.0.1 的安心提示 */}
+                  {!modalIsWinOrMac && (newTunnelData.localIp === '127.0.0.1' || newTunnelData.localIp === 'localhost') && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded p-2.5 text-xs text-emerald-800 flex items-center gap-2 font-sans">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <p className="text-[11px] text-emerald-700 leading-relaxed">
+                        {t(
+                          '已选择 127.0.0.1：Linux 客户端默认采用 Host 网络模式，直接直通宿主机服务，且完全不受路由器开机重启、DHCP 内网 IP 变动的影响。',
+                          '127.0.0.1 selected: Linux client runs in Host mode and connects directly to host services, completely immune to host reboot / DHCP LAN IP changes.'
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 针对 host.docker.internal 的固定网关提示 */}
+                  {newTunnelData.localIp === 'host.docker.internal' && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded p-2.5 text-xs text-emerald-800 flex items-center gap-2 font-sans">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <p className="text-[11px] text-emerald-700 leading-relaxed">
+                        {t(
+                          '已选择 host.docker.internal：通过 Docker 虚拟网桥固定网关直达宿主机，不受宿主机局域网 DHCP IP 变化影响。',
+                          'host.docker.internal selected: routes to host via Docker virtual bridge gateway, immune to LAN DHCP IP changes.'
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 针对选中物理局域网 IP 的提示 */}
+                  {modalDetectedHostIp && newTunnelData.localIp === modalDetectedHostIp && (
+                    <div className="bg-blue-50 border border-blue-200 rounded p-2.5 text-xs text-blue-800 flex items-start gap-2 font-sans">
+                      <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-blue-700 leading-relaxed">
+                        {t(
+                          `当前填入的是局域网 IP (${modalDetectedHostIp})。若转发的是同一局域网下的其他物理设备（如旁路由、NAS等），此配置完全正确；若转发的是客户端本机服务，建议改用 127.0.0.1 或 host.docker.internal，避免客户端重启后因 DHCP IP 变动而失效。`,
+                          `LAN IP (${modalDetectedHostIp}) is selected. Suitable for tunneling other LAN devices. If tunneling this client host itself, consider 127.0.0.1 or host.docker.internal to stay immune to DHCP changes.`
+                        )}
+                      </p>
                     </div>
                   )}
 

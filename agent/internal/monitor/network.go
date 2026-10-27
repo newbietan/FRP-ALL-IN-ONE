@@ -83,21 +83,23 @@ func DetectHostIP() (string, []string) {
 
 // getOutboundIP 通过模拟拨号获取路由决策的本地出接口 IPv4
 func getOutboundIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return ""
+	for _, target := range []string{"8.8.8.8:80", "1.1.1.1:80", "223.5.5.5:80"} {
+		conn, err := net.Dial("udp", target)
+		if err != nil {
+			continue
+		}
+		localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+		conn.Close()
+		if !ok || localAddr.IP == nil {
+			continue
+		}
+		ipv4 := localAddr.IP.To4()
+		if ipv4 == nil || ipv4.IsLoopback() || ipv4.IsUnspecified() {
+			continue
+		}
+		return ipv4.String()
 	}
-	defer conn.Close()
-
-	localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok || localAddr.IP == nil {
-		return ""
-	}
-	ipv4 := localAddr.IP.To4()
-	if ipv4 == nil || ipv4.IsLoopback() || ipv4.IsUnspecified() {
-		return ""
-	}
-	return ipv4.String()
+	return ""
 }
 
 // getInterfaceIPv4s 获取所有物理/虚拟网卡的非环回 IPv4 地址

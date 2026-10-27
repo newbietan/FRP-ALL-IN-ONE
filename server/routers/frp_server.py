@@ -680,7 +680,6 @@ if ($ENABLE_REMOTE_UPGRADE) {{ $SocketArgs = @('-v', '/var/run/docker.sock:/var/
   -e FRP_AGENT_INSECURE_TLS="$INSECURE_TLS" `
   -e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT" `
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" `
-  -e FRP_HOST_IP="$HOST_IP" `
   $IMAGE_ID `
   -server "$MANAGER_WS_URL" `
   -id "$CLIENT_ID" `
@@ -705,8 +704,9 @@ Write-Host "  部署成功！FRP-Agent 容器已在后台运行" -ForegroundColo
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host "容器名称: frp-agent"
 Write-Host "客户端 ID: $CLIENT_ID"
+Write-Host "提示: Windows Docker 环境下转发宿主机服务推荐使用 'host.docker.internal'，不受内网 IP 变动影响。" -ForegroundColor Green
 if ($HOST_IP) {{
-    Write-Host "宿主机 IP: $HOST_IP (在管理面板配置隧道时推荐使用此 IP，勿填 127.0.0.1)" -ForegroundColor Cyan
+    Write-Host "宿主机内网 IP: $HOST_IP (仅在需要转发局域网内其他设备服务时填入此 IP)" -ForegroundColor Gray
 }}
 Write-Host "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
 Write-Host "查看日志: $CONTAINER_CLI logs -f frp-agent"
@@ -821,6 +821,7 @@ if [ "{os_type}" = "linux" ]; then
     if [ "$EUID" -eq 0 ]; then
         if command -v systemctl >/dev/null 2>&1; then
             systemctl enable --now docker || log_warn "无法启用 Docker 开机自启，请手动检查 systemctl is-enabled docker"
+            systemctl enable --now containerd 2>/dev/null || true
         elif command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
             rc-update add docker default || log_warn "无法将 Docker 加入 OpenRC 默认启动级别"
             rc-service docker start || log_warn "Docker 服务启动失败，请检查 rc-service docker status"
@@ -931,7 +932,6 @@ $CONTAINER_CLI run -d \\
   -e FRP_AGENT_INSECURE_TLS="$INSECURE_TLS" \\
   -e FRP_AGENT_TLS_FINGERPRINT="$TLS_FINGERPRINT" \\
   -e FRP_AGENT_TOKEN="$CLIENT_TOKEN" \\
-  -e FRP_HOST_IP="$HOST_IP" \\
   "$IMAGE_ID" \\
   -server "$MANAGER_WS_URL" \\
   -id "$CLIENT_ID" \\
@@ -956,8 +956,13 @@ echo -e "${{GREEN}}  部署成功！FRP-Agent 容器已在后台运行${{NC}}"
 echo -e "${{GREEN}}======================================================${{NC}}"
 echo "容器名称: frp-agent"
 echo "客户端 ID: $CLIENT_ID"
+if [ "{os_type}" = "linux" ]; then
+    echo -e "提示: Linux Host 模式下转发宿主机服务推荐使用 ${{GREEN}}127.0.0.1${{NC}}，不受内网 IP 变动影响。"
+else
+    echo -e "提示: macOS Docker 环境下转发宿主机服务推荐使用 ${{GREEN}}host.docker.internal${{NC}}，不受内网 IP 变动影响。"
+fi
 if [ -n "$HOST_IP" ]; then
-    echo -e "宿主机 IP: ${{GREEN}}$HOST_IP${{NC}} (在管理面板配置隧道时推荐使用此 IP，勿填 127.0.0.1)"
+    echo -e "宿主机内网 IP: $HOST_IP (仅在需要转发局域网内其他设备服务时填入此 IP)"
 fi
 echo "查看状态: $CONTAINER_CLI ps -f name=frp-agent"
 echo "查看日志: $CONTAINER_CLI logs -f frp-agent"

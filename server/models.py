@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship  # type: ignore
 
 from database import Base
 
-APP_VERSION = os.environ.get("APP_VERSION", "3.3.2")
+APP_VERSION = os.environ.get("APP_VERSION", "3.3.3")
 GITHUB_REPO = "newbietan/FRP-ALL-IN-ONE"
 
 
