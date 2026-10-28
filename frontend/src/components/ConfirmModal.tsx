@@ -114,7 +114,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) =
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
-          className="bg-white w-full max-w-md rounded-2xl border border-slate-200/80 p-6 shadow-2xl flex flex-col gap-4 text-left relative"
+          className="bg-white w-full max-w-md rounded-2xl border border-slate-200/80 p-4 sm:p-6 shadow-2xl flex flex-col gap-4 text-left relative"
         >
           {/* Header */}
           <div className="flex items-start justify-between gap-3">
@@ -171,12 +171,12 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) =
           )}
 
           {/* Footer Buttons */}
-          <div className="flex justify-end items-center gap-2.5 pt-1">
+          <div className="flex flex-col-reverse sm:flex-row justify-end items-stretch sm:items-center gap-2 sm:gap-2.5 pt-1">
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+              className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center justify-center"
             >
               {cancelText}
             </button>
@@ -184,7 +184,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ dialog, onClose }) =
               type="button"
               onClick={handleConfirm}
               disabled={loading || (showInput && !inputValue.trim())}
-              className={`px-5 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-all flex items-center gap-1.5 ${
+              className={`w-full sm:w-auto px-5 py-2.5 sm:py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-all flex items-center justify-center gap-1.5 ${
                 showInput && !inputValue.trim() ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : getConfirmButtonClass()
               }`}
             >

@@ -1340,7 +1340,7 @@ export default function App() {
               />
               
               {/* Main Login Card */}
-              <main className="w-full max-w-md bg-[#ffffff] border border-border-subtle z-10 flex flex-col items-center p-12 shadow-sm rounded">
+              <main className="w-full max-w-md bg-[#ffffff] border border-border-subtle z-10 flex flex-col items-center p-6 sm:p-12 shadow-sm rounded">
                 {/* Logo / Branding */}
                 <div className="flex flex-col items-center mb-8">
                   <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-16 h-16 mb-3 drop-shadow-sm rounded-2xl" />
@@ -1394,7 +1394,7 @@ export default function App() {
                 </a>
               </footer>
               
-              <div className="absolute top-8 right-8 z-20">
+              <div className="absolute top-4 right-4 sm:top-8 sm:right-8 z-20">
                 <button
                   onClick={() => {
                     const nextLang = lang === 'zh' ? 'en' : 'zh';
@@ -1404,7 +1404,7 @@ export default function App() {
                       'success'
                     );
                   }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur-sm border border-border-subtle hover:bg-slate-50 transition-colors group text-on-surface-variant rounded text-xs font-medium cursor-pointer"
+                  className="flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 bg-white/80 backdrop-blur-sm border border-border-subtle hover:bg-slate-50 transition-colors group text-on-surface-variant rounded text-xs font-medium cursor-pointer"
                 >
                   <Globe className="w-4 h-4 group-hover:text-primary shrink-0" />
                   <span className="group-hover:text-primary">
@@ -1423,16 +1423,16 @@ export default function App() {
               initial="initial"
               animate="animate"
               exit="exit"
-              className="min-h-screen flex items-center justify-center p-gutter bg-background antialiased"
+              className="min-h-screen flex items-center justify-center p-3 sm:p-gutter bg-background antialiased"
             >
               <main className="w-full max-w-3xl bg-surface-container-lowest border border-border-subtle rounded-xl flex flex-col shadow-sm">
                 {/* Header */}
-                <div className="px-8 py-6 border-b border-border-subtle flex flex-col items-center text-center">
+                <div className="px-4 sm:px-8 py-4 sm:py-6 border-b border-border-subtle flex flex-col items-center text-center">
                   <h1 className="font-headline-lg text-headline-lg text-on-surface">{t('初始化向导', 'Initialization Wizard')}</h1>
                   <p className="font-body-md text-body-md text-on-surface-variant mt-2">{t('面向中国大陆境内设备，推荐使用境内 Linux 服务器', 'For devices in mainland China; use a mainland Linux server')} </p>
                 </div>
                 {/* Content */}
-                <div className="p-8 flex-grow">
+                <div className="p-4 sm:p-8 flex-grow">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Option 1: IP Direct (Selected) */}
                     <div 
@@ -1491,10 +1491,10 @@ export default function App() {
                   )}
                 </div>
                 {/* Footer */}
-                <div className="px-8 py-5 border-t border-border-subtle bg-surface-container-low flex justify-end rounded-b-xl">
+                <div className="px-4 sm:px-8 py-4 sm:py-5 border-t border-border-subtle bg-surface-container-low flex justify-end rounded-b-xl">
                   <button 
                     onClick={() => changeScreen(Screen.INIT_SERVER_CONFIG, 'push')}
-                    className="bg-primary-container text-on-primary h-[36px] px-6 rounded font-label-md text-label-md hover:bg-primary transition-colors flex items-center justify-center gap-2 cursor-pointer font-sans"
+                    className="w-full sm:w-auto bg-primary-container text-on-primary h-[36px] px-6 rounded font-label-md text-label-md hover:bg-primary transition-colors flex items-center justify-center gap-2 cursor-pointer font-sans"
                   >
                     {t('下一步', 'Next Step')}
                   </button>
@@ -1511,9 +1511,9 @@ export default function App() {
               initial="initial"
               animate="animate"
               exit="exit"
-              className="min-h-screen flex items-center justify-center p-gutter bg-background antialiased"
+              className="min-h-screen flex items-center justify-center p-3 sm:p-gutter bg-background antialiased"
             >
-              <main className="w-full max-w-[480px] bg-surface-container-lowest rounded-xl border border-border-subtle p-8 flex flex-col gap-6 relative shadow-[0_4px_24px_rgba(0,0,0,0.02)]">
+              <main className="w-full max-w-[480px] bg-surface-container-lowest rounded-xl border border-border-subtle p-5 sm:p-8 flex flex-col gap-6 relative shadow-[0_4px_24px_rgba(0,0,0,0.02)]">
                 {/* Header & Progress */}
                 <header className="flex flex-col gap-4 text-center">
                   <div className="flex justify-center mb-2">
@@ -1605,18 +1605,18 @@ export default function App() {
               initial="initial"
               animate="animate"
               exit="exit"
-              className="min-h-screen flex items-center justify-center p-gutter bg-background antialiased"
+              className="min-h-screen flex items-center justify-center p-3 sm:p-gutter bg-background antialiased"
             >
-              <main className="w-full max-w-[640px] bg-surface-container-lowest border border-border-subtle rounded-xl p-8 md:p-12 text-center flex flex-col items-center shadow-lg">
+              <main className="w-full max-w-[640px] bg-surface-container-lowest border border-border-subtle rounded-xl p-5 sm:p-8 md:p-12 text-center flex flex-col items-center shadow-lg">
                 {/* Success Icon */}
-                <div className="w-24 h-24 bg-status-online/10 rounded-full flex items-center justify-center mb-6">
-                  <CheckCircle2 className="w-14 h-14 text-status-online shrink-0" />
+                <div className="w-20 h-20 sm:w-24 sm:h-24 bg-status-online/10 rounded-full flex items-center justify-center mb-6">
+                  <CheckCircle2 className="w-12 h-12 sm:w-14 sm:h-14 text-status-online shrink-0" />
                 </div>
                 {/* Headlines */}
-                <h1 className="font-headline-lg text-headline-lg text-on-surface mb-4">{t('部署成功', 'Deployed Successfully')}</h1>
-                <p className="font-body-lg text-body-lg text-on-surface-variant mb-10">{t('您的 FRP 节点已成功初始化并正在运行。', 'Your FRPS bridge node is successfully initialized and running.')}</p>
+                <h1 className="font-headline-lg text-headline-lg text-on-surface mb-3 sm:mb-4">{t('部署成功', 'Deployed Successfully')}</h1>
+                <p className="font-body-lg text-body-lg text-on-surface-variant mb-6 sm:mb-10">{t('您的 FRP 节点已成功初始化并正在运行。', 'Your FRPS bridge node is successfully initialized and running.')}</p>
                 {/* Parameters Grid */}
-                <div className="w-full bg-surface-container-low border border-border-subtle rounded-lg p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                <div className="w-full bg-surface-container-low border border-border-subtle rounded-lg p-4 sm:p-6 mb-6 sm:mb-8 grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 text-left">
                   <div className="flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-border-subtle pb-4 md:pb-0 md:pr-4 last:border-0 last:pb-0 last:pr-0">
                     <span className="font-label-sm text-label-sm text-on-surface-variant uppercase mb-2">{t('系统版本', 'Core Release')}</span>
                     <span className="font-label-md text-label-md text-on-surface font-mono">{serverConfig.version}</span>
@@ -1691,28 +1691,37 @@ export default function App() {
               className="min-h-screen bg-[#f8fafc] flex flex-col"
             >
               {/* NAVIGATION SIDEBAR DRAWER (Responsive & Desktop Fixed) */}
-              <aside className={`fixed inset-y-0 left-0 z-40 transform ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:h-screen lg:top-0 w-60 border-r border-[#E2E8F0] bg-[#f8fafc] p-5 flex flex-col select-none transition-transform duration-200 ease-in-out shrink-0 justify-between`}>
+              <aside className={`fixed inset-y-0 left-0 z-50 transform ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:fixed lg:h-screen lg:top-0 w-60 border-r border-[#E2E8F0] bg-[#f8fafc] p-5 flex flex-col select-none transition-transform duration-200 ease-in-out shrink-0 justify-between`}>
                 <div className="flex flex-col">
                   {/* Brand Block Reference to Mock HTML layout */}
-                  <div className="mb-8 px-2 flex items-center gap-3">
-                    <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
-                    <div>
-                      <h1 className="font-headline font-black text-[#006782] text-sm tracking-tight leading-none">
-                        FRP-ALL-IN-ONE
-                      </h1>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <p className="font-mono text-[9px] text-[#6d797f] font-semibold tracking-wider">{APP_VERSION_DISPLAY}</p>
-                        {updateInfo?.has_update && (
-                          <button
-                            onClick={() => setUpdateModalOpen(true)}
-                            className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-500/20 text-amber-700 border border-amber-300 hover:bg-amber-500/30 transition-all cursor-pointer animate-pulse"
-                            title={t('点击查看新版本详情与升级指引', 'Click to view update details')}
-                          >
-                            NEW {updateInfo.latest_version}
-                          </button>
-                        )}
+                  <div className="mb-8 px-2 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
+                      <div>
+                        <h1 className="font-headline font-black text-[#006782] text-sm tracking-tight leading-none">
+                          FRP-ALL-IN-ONE
+                        </h1>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <p className="font-mono text-[9px] text-[#6d797f] font-semibold tracking-wider">{APP_VERSION_DISPLAY}</p>
+                          {updateInfo?.has_update && (
+                            <button
+                              onClick={() => setUpdateModalOpen(true)}
+                              className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-500/20 text-amber-700 border border-amber-300 hover:bg-amber-500/30 transition-all cursor-pointer animate-pulse"
+                              title={t('点击查看新版本详情与升级指引', 'Click to view update details')}
+                            >
+                              NEW {updateInfo.latest_version}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <button
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 lg:hidden cursor-pointer"
+                      title={t('关闭菜单', 'Close Menu')}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
 
                   {/* Section Title indicator */}
@@ -1807,15 +1816,15 @@ export default function App() {
               {mobileMenuOpen && (
                 <div 
                   onClick={() => setMobileMenuOpen(false)}
-                  className="fixed inset-0 z-30 bg-black/25 backdrop-blur-sm lg:hidden"
+                  className="fixed inset-0 z-40 bg-black/25 backdrop-blur-sm lg:hidden"
                 ></div>
               )}
 
               {/* MAIN CONTENT WORKSPACE AREA WITH lg:pl-60 TO COMPLEMENT THE FIXED SIDEBAR */}
               <div className="flex flex-col flex-grow lg:pl-60 min-h-screen">
                 {/* TOP HEADER STATUSBAR */}
-                <header className="sticky top-0 z-30 bg-white border-b border-border-subtle h-16 flex items-center justify-between px-6 shadow-[0_1px_4px_rgba(0,0,0,0.01)]">
-                  <div className="flex items-center gap-3">
+                <header className="sticky top-0 z-30 bg-white border-b border-border-subtle h-16 flex items-center justify-between px-3 sm:px-6 shadow-[0_1px_4px_rgba(0,0,0,0.01)]">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                     <button 
                       onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                       className="p-2 rounded hover:bg-surface-container lg:hidden shrink-0 cursor-pointer"
@@ -1823,15 +1832,15 @@ export default function App() {
                       <Menu className="w-5 h-5" />
                     </button>
                     {!mobileMenuOpen && (
-                      <div className="flex items-center gap-2 lg:hidden">
+                      <div className="flex items-center gap-2 lg:hidden truncate">
                         <img src="/favicon.svg" alt="FRP-ALL-IN-ONE Logo" className="w-5 h-5 rounded shrink-0" />
-                        <span className="font-headline font-semibold text-sm tracking-tight text-on-surface">FRP-ALL-IN-ONE</span>
+                        <span className="font-headline font-semibold text-sm tracking-tight text-on-surface truncate">FRP-ALL-IN-ONE</span>
                       </div>
                     )}
 
                   </div>
 
-                  <div className="flex items-center justify-center gap-4 text-xs font-mono h-full">
+                  <div className="flex items-center justify-center gap-2 sm:gap-4 text-xs font-mono h-full shrink-0">
                     {updateInfo?.has_update && (
                       <button
                         onClick={() => setUpdateModalOpen(true)}
@@ -1853,7 +1862,7 @@ export default function App() {
                     <div className="self-center h-4 w-[1px] bg-border-subtle hidden lg:block"></div>
                     
                     {/* Account HUD / Exit trigger & Global Language Switcher */}
-                    <div className="flex items-center justify-center gap-3">
+                    <div className="flex items-center justify-center gap-1.5 sm:gap-3">
                       {/* Language Switch Button */}
                       <button 
                         onClick={() => {
@@ -1864,11 +1873,11 @@ export default function App() {
                             'success'
                           );
                         }}
-                        className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-white border border-border-subtle hover:bg-slate-50 transition-colors text-on-surface-variant rounded text-xs font-semibold cursor-pointer shrink-0 shadow-sm"
+                        className="flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 bg-white border border-border-subtle hover:bg-slate-50 transition-colors text-on-surface-variant rounded text-xs font-semibold cursor-pointer shrink-0 shadow-sm"
                         title={lang === 'zh' ? 'Switch to English' : '切换至简体中文'}
                       >
                         <Globe className="w-3.5 h-3.5 text-primary shrink-0 animate-spin-slow" />
-                        <span className="leading-none">{lang === 'zh' ? 'English' : '简体中文'}</span>
+                        <span className="leading-none">{lang === 'zh' ? 'EN' : '中'}</span>
                       </button>
 
                       <div className="self-center h-4 w-[1px] bg-border-subtle hidden sm:block"></div>
@@ -1884,7 +1893,7 @@ export default function App() {
                           setTunnels([]);
                           changeScreen(Screen.LOGIN, 'push_back');
                         }}
-                        className="p-2 text-on-surface-variant hover:text-error hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center"
+                        className="p-1.5 sm:p-2 text-on-surface-variant hover:text-error hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center"
                         title={t('退出登录', 'Sign Out')}
                       >
                         <LogOut className="w-4 h-4" />
@@ -1894,7 +1903,7 @@ export default function App() {
                 </header>
 
                 {/* SUB SCREENS MAIN COMPARTMENT CONTAINER */}
-                <main className="flex-grow p-6 overflow-y-auto max-w-full">
+                <main className="flex-grow p-3 sm:p-6 overflow-y-auto max-w-full">
 
                   {/* VIEW A: 仪表盘 - FRP-ALL-IN-ONE */}
                   {currentScreen === Screen.DASHBOARD && (
@@ -1926,9 +1935,9 @@ export default function App() {
                       </header>
 
                       {/* Stats Row */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-6 mt-3 sm:mt-4">
                         {/* Stat 1: Total Clients */}
-                        <div className="bg-white border border-border-subtle rounded p-5 flex flex-col justify-between shadow-sm">
+                        <div className="bg-white border border-border-subtle rounded p-4 sm:p-5 flex flex-col justify-between shadow-sm">
                           <div className="flex justify-between items-start mb-4">
                             <span className="font-sans text-sm text-on-surface-variant text-left">{t('连接总数', 'Total Connections')}</span>
                             <Laptop className="w-5 h-5 text-outline shrink-0" />
@@ -1940,7 +1949,7 @@ export default function App() {
                         </div>
 
                         {/* Stat 2: Online Clients */}
-                        <div className="bg-white border border-border-subtle rounded p-5 flex flex-col justify-between relative overflow-hidden shadow-sm">
+                        <div className="bg-white border border-border-subtle rounded p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm">
                           <div className="absolute top-0 left-0 w-full h-1 bg-status-online"></div>
                           <div className="flex justify-between items-start mb-4">
                             <span className="font-sans text-sm text-on-surface-variant text-left">{t('在线设备', 'Online Devices')}</span>
@@ -1955,7 +1964,7 @@ export default function App() {
                         </div>
 
                         {/* Stat 3: Total Traffic */}
-                        <div className="bg-white border border-border-subtle rounded p-5 flex flex-col justify-between border-t-2 border-t-primary-container shadow-sm">
+                        <div className="bg-white border border-border-subtle rounded p-4 sm:p-5 flex flex-col justify-between border-t-2 border-t-primary-container shadow-sm">
                           <div className="flex justify-between items-start mb-4">
                             <span className="font-sans text-sm text-on-surface-variant text-left">{t('累计总流量', 'Cumulative Traffic')}</span>
                             <Network className="w-5 h-5 text-primary-container shrink-0" />
@@ -1980,61 +1989,63 @@ export default function App() {
                           <h3 className="font-headline font-semibold text-lg text-on-surface">{t('设备列表', 'Device List')}</h3>
                         </div>
                         <div className="bg-white border border-border-subtle rounded overflow-hidden shadow-sm">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="border-b border-border-subtle bg-surface-container-low font-sans text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
-                                <th className="py-3 px-4 font-medium">{t('状态', 'Status')}</th>
-                                <th className="py-3 px-4 font-medium">{t('主机名', 'Hostname')}</th>
-                                <th className="py-3 px-4 font-medium hidden md:table-cell">{t('操作系统 / 架构', 'OS / Architecture')}</th>
-                                <th className="py-3 px-4 font-medium text-right">{t('实时速率 (上传/下载)', 'Rate (Up/Down)')}</th>
-                                <th className="py-3 px-4 font-medium text-right">{t('累计流量', 'Cumulative Traffic')}</th>
-                              </tr>
-                            </thead>
-                            <tbody className="font-sans text-sm">
-                              {devices.map((device) => {
-                                const isOnline = device.status === 'online';
-                                return (
-                                  <tr key={device.id} className="border-b border-border-subtle hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-3 px-4">
-                                      {isOnline ? (
-                                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-surface-container text-status-online font-mono text-xs font-semibold">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-status-online"></span>
-                                          {t('在线', 'Online')}
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-error-container text-on-error-container font-mono text-xs font-semibold">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-status-offline"></span>
-                                          {t('离线', 'Offline')}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="py-3 px-4 font-mono text-xs font-bold text-on-surface">
-                                      {formatDeviceDisplayName(device)}
-                                    </td>
-                                    <td className="py-3 px-4 text-on-surface-variant font-mono text-[11px] hidden md:table-cell">
-                                      <span className="capitalize">{device.os}</span>/{device.arch || 'amd64'}
-                                    </td>
-                                    <td className="py-3 px-4 text-right font-mono text-xs">
-                                      {isOnline ? (
-                                        <>
-                                          <span className="text-status-warning font-semibold">{device.uploadRate || '0.0 KB/s'}</span>{' '}
-                                          <span className="text-on-surface-variant">/</span>{' '}
-                                          <span className="text-status-online font-semibold">{device.downloadRate || '0.0 KB/s'}</span>
-                                        </>
-                                      ) : (
-                                        <span className="text-outline">0 B/s / 0 B/s</span>
-                                      )}
-                                    </td>
-                                    <td className="py-3 px-4 text-right">
-                                      <div className="flex justify-end font-mono text-xs font-bold text-on-surface">
-                                        {device.totalTraffic || '0 B'}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse min-w-[500px]">
+                              <thead>
+                                <tr className="border-b border-border-subtle bg-surface-container-low font-sans text-xs text-on-surface-variant uppercase tracking-wider font-semibold">
+                                  <th className="py-3 px-4 font-medium">{t('状态', 'Status')}</th>
+                                  <th className="py-3 px-4 font-medium">{t('主机名', 'Hostname')}</th>
+                                  <th className="py-3 px-4 font-medium hidden md:table-cell">{t('操作系统 / 架构', 'OS / Architecture')}</th>
+                                  <th className="py-3 px-4 font-medium text-right">{t('实时速率 (上传/下载)', 'Rate (Up/Down)')}</th>
+                                  <th className="py-3 px-4 font-medium text-right">{t('累计流量', 'Cumulative Traffic')}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="font-sans text-sm">
+                                {devices.map((device) => {
+                                  const isOnline = device.status === 'online';
+                                  return (
+                                    <tr key={device.id} className="border-b border-border-subtle hover:bg-slate-50/50 transition-colors">
+                                      <td className="py-3 px-4 whitespace-nowrap">
+                                        {isOnline ? (
+                                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-surface-container text-status-online font-mono text-xs font-semibold">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-status-online"></span>
+                                            {t('在线', 'Online')}
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-error-container text-on-error-container font-mono text-xs font-semibold">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-status-offline"></span>
+                                            {t('离线', 'Offline')}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="py-3 px-4 font-mono text-xs font-bold text-on-surface whitespace-nowrap">
+                                        {formatDeviceDisplayName(device)}
+                                      </td>
+                                      <td className="py-3 px-4 text-on-surface-variant font-mono text-[11px] hidden md:table-cell whitespace-nowrap">
+                                        <span className="capitalize">{device.os}</span>/{device.arch || 'amd64'}
+                                      </td>
+                                      <td className="py-3 px-4 text-right font-mono text-xs whitespace-nowrap">
+                                        {isOnline ? (
+                                          <>
+                                            <span className="text-status-warning font-semibold">{device.uploadRate || '0.0 KB/s'}</span>{' '}
+                                            <span className="text-on-surface-variant">/</span>{' '}
+                                            <span className="text-status-online font-semibold">{device.downloadRate || '0.0 KB/s'}</span>
+                                          </>
+                                        ) : (
+                                          <span className="text-outline">0 B/s / 0 B/s</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                                        <div className="flex justify-end font-mono text-xs font-bold text-on-surface">
+                                          {device.totalTraffic || '0 B'}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </div>
                     </motion.div>
@@ -2048,27 +2059,27 @@ export default function App() {
                       className="flex flex-col gap-6"
                     >
                       {/* Page Header */}
-                      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                         <div>
-                          <h2 className="font-headline-lg text-headline-lg text-on-surface">
+                          <h2 className="font-headline-lg text-xl sm:text-headline-lg text-on-surface">
                             {t('设备管理', 'Device Management')}
                           </h2>
-                          <p className="font-body-md text-body-md text-on-surface-variant mt-1">
+                          <p className="font-body-md text-xs sm:text-body-md text-on-surface-variant mt-1">
                             {t('管理连接的节点、监控状态并配置隧道。', 'Manage connected nodes, monitor live status, and configure tunnels.')}
                           </p>
                         </div>
-                        <div className="flex gap-3">
-                          <div className="relative" id="filter-dropdown-container">
+                        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                          <div className="relative flex-1 sm:flex-initial" id="filter-dropdown-container">
                             <button 
                               onClick={() => setFilterMenuOpen(!filterMenuOpen)}
-                              className="bg-white border border-[#E2E8F0] text-on-surface hover:bg-slate-50 font-label-md text-label-md py-2.5 px-4 rounded flex items-center gap-2 shadow-sm transition-all cursor-pointer font-sans"
+                              className="w-full sm:w-auto justify-center bg-white border border-[#E2E8F0] text-on-surface hover:bg-slate-50 font-label-md text-xs sm:text-label-md py-2 sm:py-2.5 px-3 sm:px-4 rounded flex items-center gap-2 shadow-sm transition-all cursor-pointer font-sans"
                             >
                               <Filter className="w-4 h-4 text-[#006a60]" />
                               {t('过滤', 'Filter')}
                             </button>
                             
                             {filterMenuOpen && (
-                              <div className="absolute right-0 mt-2 w-64 bg-white border border-outline-variant rounded-lg shadow-xl z-50 overflow-hidden text-left">
+                              <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] bg-white border border-outline-variant rounded-lg shadow-xl z-50 overflow-hidden text-left">
                                 <div className="p-3 border-b border-[#E2E8F0]">
                                   <p className="font-label-sm text-[11px] text-on-surface-variant uppercase tracking-wider mb-2 font-mono">
                                     {t('操作系统', 'OS Platforms')}
@@ -2173,7 +2184,7 @@ export default function App() {
                           
                           <button
                             onClick={() => changeScreen(Screen.ADD_DEVICE, 'slide_up')}
-                            className="bg-primary-container hover:bg-primary font-label-md text-label-md py-2 px-4 rounded text-white flex items-center gap-2 shadow-sm cursor-pointer font-sans transition-all"
+                            className="flex-1 sm:flex-initial justify-center bg-primary-container hover:bg-primary font-label-md text-xs sm:text-label-md py-2 sm:py-2.5 px-3 sm:px-4 rounded text-white flex items-center gap-2 shadow-sm cursor-pointer font-sans transition-all whitespace-nowrap"
                           >
                             <Plus className="w-4 h-4" />
                             {t('添加新设备', 'Add New Device')}
@@ -2182,43 +2193,43 @@ export default function App() {
                       </header>
 
                       {/* Stats Overview Bento Grid */}
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 shadow-sm">
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-3 sm:p-4 shadow-sm">
                           <div className="flex justify-between items-start mb-2">
-                            <span className="font-body-md text-body-md text-on-surface-variant font-medium select-none">{t('活跃设备', 'Active Devices')}</span>
-                            <HardDrive className="text-status-online w-5 h-5 shrink-0" />
+                            <span className="font-body-md text-xs sm:text-body-md text-on-surface-variant font-medium select-none truncate">{t('活跃设备', 'Active Devices')}</span>
+                            <HardDrive className="text-status-online w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
                           </div>
-                          <div className="font-headline-md text-headline-md text-on-surface font-black text-left">
+                          <div className="text-xl sm:text-headline-md text-on-surface font-black text-left">
                             {devices.filter(d => d.status === 'online').length}
                           </div>
                         </div>
                         
-                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 shadow-sm">
+                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-3 sm:p-4 shadow-sm">
                           <div className="flex justify-between items-start mb-2">
-                            <span className="font-body-md text-body-md text-on-surface-variant font-medium select-none">{t('离线设备', 'Offline Devices')}</span>
-                            <AlertTriangle className="text-status-offline w-5 h-5 shrink-0" />
+                            <span className="font-body-md text-xs sm:text-body-md text-on-surface-variant font-medium select-none truncate">{t('离线设备', 'Offline Devices')}</span>
+                            <AlertTriangle className="text-status-offline w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
                           </div>
-                          <div className="font-headline-md text-headline-md text-on-surface font-black text-left">
+                          <div className="text-xl sm:text-headline-md text-on-surface font-black text-left">
                             {devices.filter(d => d.status === 'offline').length}
                           </div>
                         </div>
                         
-                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 shadow-sm">
+                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-3 sm:p-4 shadow-sm">
                           <div className="flex justify-between items-start mb-2">
-                            <span className="font-body-md text-body-md text-on-surface-variant font-medium select-none">{t('隧道总数', 'Total Tunnels')}</span>
-                            <Radio className="text-[#006782] w-5 h-5 shrink-0 animate-pulse-slow" />
+                            <span className="font-body-md text-xs sm:text-body-md text-on-surface-variant font-medium select-none truncate">{t('隧道总数', 'Total Tunnels')}</span>
+                            <Radio className="text-[#006782] w-4 h-4 sm:w-5 sm:h-5 shrink-0 animate-pulse-slow" />
                           </div>
-                          <div className="font-headline-md text-headline-md text-on-surface font-black text-left">
+                          <div className="text-xl sm:text-headline-md text-on-surface font-black text-left">
                             {tunnels.length}
                           </div>
                         </div>
                         
-                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-4 shadow-sm">
+                        <div className="bg-white border border-[#E2E8F0] rounded-lg p-3 sm:p-4 shadow-sm">
                           <div className="flex justify-between items-start mb-2">
-                            <span className="font-body-md text-body-md text-on-surface-variant font-medium select-none">{t('活跃连接', 'Active Connections')}</span>
-                            <Activity className="text-[#00add5] w-5 h-5 shrink-0" />
+                            <span className="font-body-md text-xs sm:text-body-md text-on-surface-variant font-medium select-none truncate">{t('活跃连接', 'Active Connections')}</span>
+                            <Activity className="text-[#00add5] w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
                           </div>
-                          <div className="font-headline-md text-headline-md text-on-surface font-black text-left">
+                          <div className="text-xl sm:text-headline-md text-on-surface font-black text-left">
                             {tunnels.filter(t => t.status === 'online').length}/{tunnels.length}
                           </div>
                         </div>
@@ -2227,26 +2238,26 @@ export default function App() {
                       {/* Main Device Table Container */}
                       <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden flex flex-col shadow-sm">
                         {/* Search / Action Bar */}
-                        <div className="p-4 border-b border-[#E2E8F0] bg-slate-50/50 flex flex-col sm:flex-row justify-between gap-4">
-                          <div className="relative w-full sm:max-w-md">
+                        <div className="p-3 sm:p-4 border-b border-[#E2E8F0] bg-slate-50/50 flex flex-row items-center justify-between gap-2 sm:gap-4">
+                          <div className="relative flex-1 sm:max-w-md">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-outline w-4 h-4 shrink-0" />
                             <input
                               value={deviceSearchQuery}
                               onChange={(e) => setDeviceSearchQuery(e.target.value)}
-                              className="w-full bg-white border border-[#E2E8F0] rounded pl-10 pr-10 py-2 font-body-md text-body-md focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all text-on-surface font-sans"
+                              className="w-full bg-white border border-[#E2E8F0] rounded pl-9 sm:pl-10 pr-8 sm:pr-10 py-1.5 sm:py-2 text-xs sm:text-body-md focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all text-on-surface font-sans"
                               placeholder={t('搜索主机名、IP 或操作系统...', 'Search hostname, IP platform, OS architecture...')}
                               type="text"
                             />
                             {deviceSearchQuery && (
                               <button 
                                 onClick={() => setDeviceSearchQuery('')}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface p-0.5 rounded cursor-pointer"
+                                className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface p-0.5 rounded cursor-pointer"
                               >
                                 <X className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex gap-2 shrink-0">
                             <button
                               onClick={() => {
                                 setDeviceSearchQuery('');
@@ -2263,7 +2274,7 @@ export default function App() {
 
                         {/* Table Wrapper */}
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
+                          <table className="w-full text-left border-collapse min-w-[540px] sm:min-w-full">
                             <thead>
                               <tr className="bg-slate-50 border-b border-[#E2E8F0] select-none">
                                 <th className="py-3 px-4 font-label-md text-[11px] text-on-surface-variant font-semibold uppercase tracking-wider w-16 text-center">
@@ -2444,11 +2455,11 @@ export default function App() {
                                       {isExpanded && (
                                         <tr className="bg-slate-50/35 border-b border-[#E2E8F0]">
                                           <td className="p-0 border-l-4 border-l-primary" colSpan={6}>
-                                            <div className="p-5">
-                                              <div className="flex justify-between items-center mb-4 select-none">
-                                                <h4 className="font-headline font-semibold text-xs uppercase tracking-wider text-on-surface flex items-center gap-1.5">
-                                                  <Radio className="w-4 h-4 text-[#006782]" />
-                                                  {t('活跃穿透隧道映射列表 (Mapped FRP Ports)', 'Forwarded Port Sub-Tunnels')}
+                                            <div className="p-3 sm:p-5">
+                                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 mb-3 sm:mb-4 select-none">
+                                                <h4 className="font-headline font-semibold text-xs uppercase tracking-wider text-on-surface flex items-center gap-1.5 flex-wrap">
+                                                  <Radio className="w-4 h-4 text-[#006782] shrink-0" />
+                                                  <span>{t('活跃穿透隧道映射列表 (Mapped FRP Ports)', 'Forwarded Port Sub-Tunnels')}</span>
                                                   <span className="bg-slate-100 px-2 py-0.5 rounded-full text-[#006a60] text-[10px] font-bold">
                                                     {deviceTunnels.length}
                                                   </span>
@@ -2466,7 +2477,7 @@ export default function App() {
                                                     }));
                                                     setAddTunnelModalOpen(true);
                                                   }}
-                                                  className="bg-white hover:bg-slate-50 border border-[#E2E8F0] hover:border-slate-300 text-primary font-semibold text-[11px] py-1.5 px-3 rounded flex items-center gap-1 transition-colors cursor-pointer font-sans shadow-sm"
+                                                  className="w-full sm:w-auto justify-center bg-white hover:bg-slate-50 border border-[#E2E8F0] hover:border-slate-300 text-primary font-semibold text-[11px] py-1.5 px-3 rounded flex items-center gap-1 transition-colors cursor-pointer font-sans shadow-sm"
                                                 >
                                                   <Plus className="w-3.5 h-3.5" />
                                                   {t('绑定新增子隧道', 'Mount Sub-Tunnel')}
@@ -2478,8 +2489,8 @@ export default function App() {
                                                   {t('暂无关联端口隧道，点击上方按钮 “绑定新增子隧道” 可快速新增穿透映射。', 'No sub-tunnels configured. Mount a map channel above to tunnel local servers.')}
                                                 </div>
                                               ) : (
-                                                <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden shadow-sm">
-                                                  <table className="w-full text-left text-sm border-collapse">
+                                                <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-x-auto shadow-sm">
+                                                  <table className="w-full text-left text-sm border-collapse min-w-[560px]">
                                                     <thead className="bg-slate-50 border-b border-[#E2E8F0] select-none">
                                                       <tr>
                                                         <th className="py-2 px-3 font-label-md text-[10px] text-outline font-semibold uppercase font-mono">
@@ -2595,14 +2606,14 @@ export default function App() {
 
                         {/* Pagination Footer */}
                         {filteredDevices.length > 0 && (
-                        <div className="p-4 border-t border-[#E2E8F0] bg-white flex flex-col sm:flex-row justify-between items-center gap-3 text-xs font-semibold select-none">
-                          <span className="text-on-surface-variant font-sans">
+                        <div className="p-3 sm:p-4 border-t border-[#E2E8F0] bg-white flex flex-col sm:flex-row justify-between items-center gap-2.5 sm:gap-3 text-xs font-semibold select-none">
+                          <span className="text-on-surface-variant font-sans text-center sm:text-left text-[11px] sm:text-xs">
                             {t(
                               `显示第 ${(safeCurrentPage - 1) * ITEMS_PER_PAGE + 1} 至 ${Math.min(safeCurrentPage * ITEMS_PER_PAGE, filteredDevices.length)} 项，共 ${filteredDevices.length} 个设备`,
                               `Displaying ${(safeCurrentPage - 1) * ITEMS_PER_PAGE + 1} to ${Math.min(safeCurrentPage * ITEMS_PER_PAGE, filteredDevices.length)} of ${filteredDevices.length} registered terminal nodes`
                             )}
                           </span>
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap justify-center gap-1">
                             <button
                               disabled={safeCurrentPage <= 1}
                               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -2645,27 +2656,27 @@ export default function App() {
                       className="flex flex-col gap-6 text-left"
                     >
                       {/* Header */}
-                      <header className="pb-6 border-b border-border-subtle bg-white -mx-6 -mt-6 px-6 py-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                      <header className="pb-4 sm:pb-6 border-b border-border-subtle bg-white -mx-3 -mt-3 px-3 sm:-mx-6 sm:-mt-6 sm:px-6 py-4 sm:py-6 flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4">
                         <div>
-                          <h2 className="font-headline-lg text-headline-lg text-on-surface mb-1">
+                          <h2 className="font-headline-lg text-xl sm:text-headline-lg text-on-surface mb-1">
                             {t('系统设置', 'System Settings')}
                           </h2>
-                          <p className="font-body-md text-body-md text-on-surface-variant">
+                          <p className="font-body-md text-xs sm:text-body-md text-on-surface-variant">
                             {t('配置 FRP 核心、网络路由和安全参数。', 'Configure FRP core, network routing, and security parameters.')}
                           </p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
                           <button
                             type="button"
                             onClick={handleDiscardSettings}
-                            className="px-4 py-2 border border-outline-variant text-on-surface-variant hover:bg-slate-50 hover:text-on-surface rounded font-label-md text-label-md transition-colors bg-white cursor-pointer shadow-sm"
+                            className="flex-1 sm:flex-initial px-3 sm:px-4 py-2 border border-outline-variant text-on-surface-variant hover:bg-slate-50 hover:text-on-surface rounded font-label-md text-xs sm:text-label-md transition-colors bg-white cursor-pointer shadow-sm text-center"
                           >
                             {t('放弃修改', 'Discard Changes')}
                           </button>
                           <button
                             type="button"
                             onClick={() => handleSaveSettings()}
-                            className="px-4 py-2 bg-[#006782] hover:bg-[#005066] text-white rounded font-label-md text-label-md transition-colors shadow-sm flex items-center gap-2 cursor-pointer font-bold"
+                            className="flex-1 sm:flex-initial px-3 sm:px-4 py-2 bg-[#006782] hover:bg-[#005066] text-white rounded font-label-md text-xs sm:text-label-md transition-colors shadow-sm flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer font-bold"
                           >
                             <Save className="w-4 h-4" />
                             {t('保存配置', 'Save Config')}
@@ -2680,7 +2691,7 @@ export default function App() {
                           
                           {/* 可选高级设置，不进入基础 TCP/UDP 部署流程 */}
                           <details className="bg-white border border-border-subtle rounded-xl overflow-hidden relative shadow-sm">
-                            <summary className="p-6 border-b border-border-subtle bg-slate-50 cursor-pointer">
+                            <summary className="p-4 sm:p-6 border-b border-border-subtle bg-slate-50 cursor-pointer">
                               <div className="flex items-center gap-3 mb-2">
                                 <Globe className="w-5 h-5 text-[#006782] shrink-0" />
                                 <h3 className="font-headline font-semibold text-base text-on-surface">
@@ -2692,7 +2703,7 @@ export default function App() {
                               </p>
                             </summary>
                             
-                            <div className="p-6 space-y-6">
+                            <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
                               <p className="text-xs leading-relaxed p-3 rounded bg-amber-50 text-amber-900">
                                 {t('大陆服务器提供网站服务时，请先按接入商和主管部门要求办理 ICP 备案等手续。要求不因 HTTP/HTTPS、IP 访问或更换端口而当然豁免；证书不能替代备案。未准备好时保留基础配置，并通过防火墙限制面板来源。', 'For websites hosted in mainland China, meet applicable ICP filing and hosting requirements. HTTP/HTTPS, IP access or alternate ports are not automatic exemptions. Certificates do not replace filing. Restrict panel access while preparing.')}
                                 {' '}<a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" className="underline">{t('工信部备案系统', 'MIIT filing portal')}</a>
@@ -2741,12 +2752,12 @@ export default function App() {
                               </div>
                               
                               {/* DNS Check Status */}
-                              <div className="bg-slate-50 p-4 rounded border border-border-subtle flex items-center justify-between gap-4">
+                              <div className="bg-slate-50 p-3 sm:p-4 rounded border border-border-subtle flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
                                 <div className="flex items-center gap-3">
                                   <div className={`w-2.5 h-2.5 rounded-full ${dnsCheckLoading ? 'bg-amber-400 animate-spin border border-transparent' : 'bg-status-online animate-pulse'}`}></div>
                                   <div>
                                     <p className="font-semibold text-xs text-on-surface">{t('DNS 解析检查', 'DNS Resolution Check')}</p>
-                                    <p className="font-mono text-[11px] text-on-surface-variant mt-0.5">
+                                    <p className="font-mono text-[11px] text-on-surface-variant mt-0.5 break-all">
                                       {tempDomain} {t('解析为', 'resolves to')} {serverConfig.ip}
                                     </p>
                                   </div>
@@ -2755,7 +2766,7 @@ export default function App() {
                                   type="button"
                                   onClick={handleRunDnsCheck}
                                   disabled={dnsCheckLoading}
-                                  className="text-[#006782] hover:text-[#00add8] disabled:opacity-50 font-semibold text-xs uppercase tracking-wider transition-colors cursor-pointer select-none"
+                                  className="text-[#006782] hover:text-[#00add8] disabled:opacity-50 font-semibold text-xs uppercase tracking-wider transition-colors cursor-pointer select-none self-end sm:self-auto shrink-0"
                                 >
                                   {dnsCheckLoading ? t('正在查询...', 'Resolving...') : t('重新检查', 'Recheck')}
                                 </button>
@@ -2766,7 +2777,7 @@ export default function App() {
 
                           {/* Section 2: NAT Configuration */}
                           <section className="bg-white border border-border-subtle rounded-xl overflow-hidden relative shadow-sm">
-                            <div className="p-6 border-b border-border-subtle bg-slate-50">
+                            <div className="p-4 sm:p-6 border-b border-border-subtle bg-slate-50">
                               <div className="flex items-center gap-3 mb-2">
                                 <Network className="w-5 h-5 text-secondary shrink-0" />
                                 <h3 className="font-headline font-semibold text-base text-on-surface">
@@ -2778,7 +2789,7 @@ export default function App() {
                               </p>
                             </div>
                             
-                            <div className="p-6 space-y-6">
+                            <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
                                   <label className="block font-label-md text-xs text-on-surface mb-2 font-semibold">
@@ -2825,7 +2836,7 @@ export default function App() {
                           
                           {/* Section 3: Account Security */}
                           <section className="bg-white border border-border-subtle rounded-xl overflow-hidden shadow-sm">
-                            <div className="p-5 border-b border-border-subtle bg-slate-50">
+                            <div className="p-4 sm:p-5 border-b border-border-subtle bg-slate-50">
                               <div className="flex items-center gap-3">
                                 <Shield className="w-5 h-5 text-[#9134a7] shrink-0" />
                                 <h3 className="font-headline font-semibold text-sm text-on-surface">
@@ -2834,7 +2845,7 @@ export default function App() {
                               </div>
                             </div>
                             
-                            <div className="p-5">
+                            <div className="p-4 sm:p-5">
                               <div className="bg-slate-50 p-4 border border-border-subtle rounded-lg">
                                 <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2 select-none">
                                   {t('当前关联的 GITHUB 账号', 'CURRENT ASSOCIATED GITHUB ID')}
@@ -2870,7 +2881,7 @@ export default function App() {
 
                           {/* Section 4: System Info */}
                           <section className="bg-[#24292F] text-white border border-[#24292F] rounded-xl overflow-hidden shadow-sm">
-                            <div className="p-5 border-b border-white/10">
+                            <div className="p-4 sm:p-5 border-b border-white/10">
                               <div className="flex items-center gap-3">
                                 <Terminal className="w-5 h-5 text-cyan-400 shrink-0" />
                                 <h3 className="font-headline font-semibold text-sm text-white">
@@ -2879,7 +2890,7 @@ export default function App() {
                               </div>
                             </div>
                             
-                            <div className="p-5 space-y-4 font-mono text-xs text-slate-300 text-left">
+                            <div className="p-4 sm:p-5 space-y-4 font-mono text-xs text-slate-300 text-left">
                               <div className="flex justify-between items-center pb-3 border-b border-white/10 select-none">
                                 <span className="text-slate-400">{t('版本', 'Version')}</span>
                                 <span className="text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded text-[11px] font-bold">
@@ -2890,7 +2901,7 @@ export default function App() {
                               <div className="flex justify-between items-center pb-3 border-b border-white/10">
                                 <span className="text-slate-400">{t('数据库路径', 'Database File')}</span>
                                 <span
-                                  className="text-slate-200 select-all cursor-pointer font-semibold truncate max-w-[200px]"
+                                  className="text-slate-200 select-all cursor-pointer font-semibold truncate max-w-[140px] sm:max-w-[200px]"
                                   title={systemInfo?.database_path || ''}
                                   onClick={() => systemInfo?.database_path && handleCopyText(systemInfo.database_path)}
                                 >
@@ -2913,7 +2924,7 @@ export default function App() {
                                 <span className="text-slate-200 font-semibold">{systemInfo?.start_time || '-'}</span>
                               </div>
 
-                              <div className="flex gap-2 mt-2">
+                              <div className="flex flex-col sm:flex-row gap-2 mt-2">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -2949,37 +2960,37 @@ export default function App() {
                       initial="initial"
                       animate="animate"
                       exit="exit"
-                      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+                      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
                     >
-                      <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 flex flex-col p-6 shadow-2xl relative max-h-[85vh] overflow-y-auto text-left">
+                      <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 flex flex-col p-4 sm:p-6 shadow-2xl relative max-h-[90vh] sm:max-h-[85vh] overflow-y-auto text-left">
                         {/* Header controls layout */}
-                        <div className="flex items-start justify-between border-b border-border-subtle pb-4">
+                        <div className="flex items-start justify-between border-b border-border-subtle pb-3 sm:pb-4 gap-2">
                           <div>
-                            <h2 className="font-headline-md text-headline-md text-on-surface">{t('添加新设备', 'Add New Device')}</h2>
-                            <p className="font-body-md text-body-md text-on-surface-variant mt-1">{t('优先面向境内 Linux/NAS 设备；统一使用容器镜像。Windows/macOS 需自行确认虚拟机网络与镜像兼容性。', 'Linux/NAS devices in mainland China are the primary target. Windows/macOS require compatible images and VM networking.')}</p>
+                            <h2 className="font-headline-md text-lg sm:text-headline-md text-on-surface">{t('添加新设备', 'Add New Device')}</h2>
+                            <p className="font-body-md text-xs sm:text-body-md text-on-surface-variant mt-1">{t('优先面向境内 Linux/NAS 设备；统一使用容器镜像。Windows/macOS 需自行确认虚拟机网络与镜像兼容性。', 'Linux/NAS devices in mainland China are the primary target. Windows/macOS require compatible images and VM networking.')}</p>
                           </div>
                           
                           <button 
                             aria-label="Close"
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
                           >
                             <X className="w-5 h-5 shrink-0" />
                           </button>
                         </div>
 
                         {/* OS Interactive card Selection block layout XPath matches */}
-                        <div className="py-6 flex flex-col gap-6">
+                        <div className="py-4 sm:py-6 flex flex-col gap-4 sm:gap-6">
                           <div>
                             <p className="text-xs font-mono text-outline uppercase font-medium mb-3">{t('选择客户端运行环境', 'Choose Client Deployment Environment')}</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                               {/* Linux Selector DIV XPath match */}
                               <div 
                                 data-os="linux"
                                 onClick={() => handleSelectOS('linux')}
-                                className="border border-border-subtle hover:border-[#006782] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
+                                className="border border-border-subtle hover:border-[#006782] px-3 sm:px-4 py-4 sm:py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2 relative group"
                               >
-                                <div className="p-2.5 bg-[#006782]/10 text-[#006782] rounded-full">
+                                <div className="p-2 sm:p-2.5 bg-[#006782]/10 text-[#006782] rounded-full">
                                   <Terminal className="w-5 h-5 shrink-0" />
                                 </div>
                                 <span className="font-headline text-sm font-semibold text-on-surface">{t('Linux / NAS（推荐）', 'Linux / NAS (recommended)')}</span>
@@ -2990,9 +3001,9 @@ export default function App() {
                               <div 
                                 data-os="windows"
                                 onClick={() => handleSelectOS('windows')}
-                                className="border border-border-subtle hover:border-[#00add8] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
+                                className="border border-border-subtle hover:border-[#00add8] px-3 sm:px-4 py-4 sm:py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2 relative group"
                               >
-                                <div className="p-2.5 bg-[#00add8]/10 text-[#00add8] rounded-full">
+                                <div className="p-2 sm:p-2.5 bg-[#00add8]/10 text-[#00add8] rounded-full">
                                   <LayoutGrid className="w-6 h-6 shrink-0" />
                                 </div>
                                 <span className="font-headline text-sm font-semibold text-on-surface">Windows</span>
@@ -3003,9 +3014,9 @@ export default function App() {
                               <div 
                                 data-os="macos"
                                 onClick={() => handleSelectOS('macos')}
-                                className="border border-border-subtle hover:border-[#da79ef] px-4 py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2.5 relative group"
+                                className="border border-border-subtle hover:border-[#da79ef] px-3 sm:px-4 py-4 sm:py-6 rounded-lg cursor-pointer bg-slate-50/50 hover:bg-slate-100/50 transition-all text-center flex flex-col items-center gap-2 relative group"
                               >
-                                <div className="p-2.5 bg-[#da79ef]/10 text-[#da79ef] rounded-full">
+                                <div className="p-2 sm:p-2.5 bg-[#da79ef]/10 text-[#da79ef] rounded-full">
                                   <Laptop className="w-6 h-6 shrink-0" />
                                 </div>
                                 <span className="font-headline text-sm font-semibold text-on-surface">macOS</span>
@@ -3081,16 +3092,16 @@ export default function App() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+                      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
                     >
-                      <div className="relative bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 flex flex-col shadow-2xl text-left max-h-[85vh] overflow-y-auto">
+                      <div className="relative bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 flex flex-col shadow-2xl text-left max-h-[90vh] sm:max-h-[85vh] overflow-y-auto">
                         {/* Header components */}
-                        <div className="px-6 pt-6 pb-4 border-b border-border-subtle flex items-start justify-between">
+                        <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4 border-b border-border-subtle flex items-start justify-between gap-2">
                           <div>
-                            <h2 className="font-headline-md text-headline-md text-primary font-bold">
+                            <h2 className="font-headline-md text-lg sm:text-headline-md text-primary font-bold">
                               {t('一键拉取并部署客户端', 'Client One-Click Deploy')}
                             </h2>
-                            <p className="font-body-md text-body-md text-on-surface-variant mt-1.5 text-xs text-slate-600 max-w-xl">
+                            <p className="font-body-md text-body-md text-on-surface-variant mt-1 text-xs text-slate-600 max-w-xl">
                               {t(
                                 '在目标设备终端中执行对应系统的安装命令，客户端将自动从服务端拉取脚本并启动容器。启动后自动注册上线，零多余配置。',
                                 'Run the one-line command on your target device to pull the installer from the server and start the agent container automatically.'
@@ -3101,20 +3112,20 @@ export default function App() {
                           <button 
                             aria-label="关闭"
                             onClick={() => changeScreen(Screen.DEVICE_MANAGEMENT, 'push_back')}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
                           >
                             <X className="w-5 h-5 shrink-0" />
                           </button>
                         </div>
 
                         {/* Content Scroll area */}
-                        <div className="p-6 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+                        <div className="p-4 sm:p-6 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4">
                           
                           {/* OS Tabs */}
-                          <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                          <div className="flex items-center gap-1.5 sm:gap-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
                             <button
                               onClick={() => setSelectedOs('linux')}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 shrink-0 ${
                                 selectedOs === 'linux' ? 'bg-[#006782] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                               }`}
                             >
@@ -3123,7 +3134,7 @@ export default function App() {
                             </button>
                             <button
                               onClick={() => setSelectedOs('windows')}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 shrink-0 ${
                                 selectedOs === 'windows' ? 'bg-[#00add8] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                               }`}
                             >
@@ -3132,7 +3143,7 @@ export default function App() {
                             </button>
                             <button
                               onClick={() => setSelectedOs('macos')}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 shrink-0 ${
                                 selectedOs === 'macos' ? 'bg-[#da79ef] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                               }`}
                             >
@@ -3266,22 +3277,22 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
             >
               <motion.div
                 initial={{ scale: 0.95, y: 15 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 15 }}
-                className="bg-white w-full max-w-lg rounded-2xl border border-slate-200/80 p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[85vh] overflow-y-auto"
+                className="bg-white w-full max-w-lg rounded-2xl border border-slate-200/80 p-4 sm:p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[90vh] sm:max-h-[85vh] overflow-y-auto"
               >
                 <div className="flex justify-between items-center border-b border-border-subtle pb-3">
-                  <h3 className="font-headline font-semibold text-sm uppercase tracking-wider text-on-surface flex items-center gap-2">
-                    <PlusCircle className="w-4 h-4 text-primary" />
-                    {t('新建穿透映射 (FRP Proxy Client Node)', 'New FRP Proxy Tunnel')}
+                  <h3 className="font-headline font-semibold text-xs sm:text-sm uppercase tracking-wider text-on-surface flex items-center gap-2 truncate">
+                    <PlusCircle className="w-4 h-4 text-primary shrink-0" />
+                    <span className="truncate">{t('新建穿透映射 (FRP Proxy Client Node)', 'New FRP Proxy Tunnel')}</span>
                   </h3>
                   <button 
                     onClick={() => setAddTunnelModalOpen(false)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -3311,7 +3322,7 @@ export default function App() {
                     </select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-mono text-outline uppercase font-semibold">{t('服务通道名称 (Proxy Name)', 'Proxy Name')}</label>
                       <input 
@@ -3340,7 +3351,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3 font-mono text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] text-outline uppercase font-semibold">{t('内部局域网 IP / 主机名', 'Local IP / Host')}</label>
@@ -3539,17 +3550,17 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="flex justify-end gap-3 border-t border-border-subtle pt-4 mt-2">
+                  <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 border-t border-border-subtle pt-4 mt-2">
                     <button 
                       type="button"
                       onClick={() => setAddTunnelModalOpen(false)}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors font-sans"
+                      className="w-full sm:w-auto px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors font-sans"
                     >
                       {t('取消', 'Cancel')}
                     </button>
                     <button 
                       type="submit"
-                      className="bg-primary hover:bg-[#005166] text-white text-xs font-semibold py-2 px-5 rounded-lg cursor-pointer font-sans shadow-sm transition-colors"
+                      className="w-full sm:w-auto bg-primary hover:bg-[#005166] text-white text-xs font-semibold py-2 px-5 rounded-lg cursor-pointer font-sans shadow-sm transition-colors"
                     >
                       {t('确认创建映射', 'Confirm Mapping')}
                     </button>
@@ -3568,35 +3579,35 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[6px] flex items-center justify-center p-4 sm:p-6"
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[6px] flex items-center justify-center p-2 sm:p-4 md:p-6"
           >
             <motion.div
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
-              className="bg-white border border-[#E2E8F0] rounded-xl shadow-lg w-full max-w-5xl h-[80vh] flex flex-col overflow-hidden text-left"
+              className="bg-white border border-[#E2E8F0] rounded-xl shadow-lg w-full max-w-5xl h-[88vh] sm:h-[80vh] flex flex-col overflow-hidden text-left"
             >
               {/* Modal Header */}
-              <div className="px-6 py-4 border-b border-[#E2E8F0] flex items-center justify-between bg-slate-50">
-                <div className="flex items-center gap-4">
-                  <h2 className="font-headline font-semibold text-base text-on-surface">{t('实时日志', 'Realtime Logs')}</h2>
-                  <div className="flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-[#E2E8F0] select-none">
-                    <span className={`w-2 h-2 rounded-full ${logModalDevice.status === 'online' ? 'bg-status-online animate-pulse' : 'bg-status-offline'}`}></span>
-                    <span className="font-mono text-xs text-on-surface-variant font-medium">{logModalDevice.name}</span>
+              <div className="px-3 sm:px-6 py-2.5 sm:py-4 border-b border-[#E2E8F0] flex flex-wrap items-center justify-between gap-2 bg-slate-50">
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                  <h2 className="font-headline font-semibold text-sm sm:text-base text-on-surface">{t('实时日志', 'Realtime Logs')}</h2>
+                  <div className="flex items-center gap-1.5 px-2.5 py-0.5 sm:px-3 sm:py-1 bg-white rounded-full border border-[#E2E8F0] select-none truncate">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${logModalDevice.status === 'online' ? 'bg-status-online animate-pulse' : 'bg-status-offline'}`}></span>
+                    <span className="font-mono text-xs text-on-surface-variant font-medium truncate">{logModalDevice.name}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 mr-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <div className="flex items-center gap-1 sm:gap-2 mr-1 sm:mr-2">
                     <button
                       onClick={handleClearLogs}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#E2E8F0] rounded bg-white hover:bg-slate-50 hover:border-slate-300 transition-all font-semibold text-on-surface-variant cursor-pointer shadow-sm"
+                      className="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 text-xs border border-[#E2E8F0] rounded bg-white hover:bg-slate-50 hover:border-slate-300 transition-all font-semibold text-on-surface-variant cursor-pointer shadow-sm"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>{t('清除', 'Clear')}</span>
                     </button>
                     <button
                       onClick={handleDownloadLogs}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#E2E8F0] rounded bg-white hover:bg-slate-50 hover:border-slate-300 transition-all font-semibold text-on-surface-variant cursor-pointer shadow-sm"
+                      className="flex items-center gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 text-xs border border-[#E2E8F0] rounded bg-white hover:bg-slate-50 hover:border-slate-300 transition-all font-semibold text-on-surface-variant cursor-pointer shadow-sm"
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>{t('下载', 'Download')}</span>
@@ -3640,7 +3651,7 @@ export default function App() {
               </div>
 
               {/* Terminal Footer / Status */}
-              <div className="bg-[#1a1e23] border-t border-white/10 px-6 py-2.5 flex justify-between items-center text-xs font-mono text-slate-300 select-none">
+              <div className="bg-[#1a1e23] border-t border-white/10 px-3 sm:px-6 py-2 sm:py-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 sm:gap-0 text-[11px] sm:text-xs font-mono text-slate-300 select-none">
                 <div className="flex items-center gap-4">
                   <span className="flex items-center gap-1.5">
                     <span className={`w-1.5 h-1.5 rounded-full ${logModalDevice.status === 'online' ? 'bg-status-online animate-pulse' : 'bg-status-offline'}`}></span>
@@ -3662,18 +3673,18 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
           >
             <motion.div
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
-              className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[85vh] overflow-y-auto"
+              className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 p-4 sm:p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[90vh] sm:max-h-[85vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center border-b border-border-subtle pb-3">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-primary" />
-                  <h3 className="font-headline font-bold text-base text-on-surface">
+                  <h3 className="font-headline font-bold text-sm sm:text-base text-on-surface">
                     {t('系统版本与自动升级中心', 'Version & Auto-Update Center')}
                   </h3>
                 </div>
@@ -3686,20 +3697,20 @@ export default function App() {
               </div>
 
               {/* Status card */}
-              <div className={`p-4 rounded-lg border flex items-center justify-between ${
+              <div className={`p-3.5 sm:p-4 rounded-lg border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
                 updateInfo?.has_update 
                   ? 'bg-amber-50/70 border-amber-300 text-amber-900' 
                   : 'bg-emerald-50/70 border-emerald-300 text-emerald-900'
               }`}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${updateInfo?.has_update ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                  <div className={`w-3 h-3 rounded-full shrink-0 ${updateInfo?.has_update ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
                   <div>
-                    <p className="font-semibold text-sm">
+                    <p className="font-semibold text-xs sm:text-sm">
                       {updateInfo?.has_update
                         ? t(`发现新版本 ${updateInfo.latest_version}（当前: ${APP_VERSION_DISPLAY}）`, `New version ${updateInfo.latest_version} available (Current: ${APP_VERSION_DISPLAY})`)
                         : t(`当前已是最新版本 (${APP_VERSION_DISPLAY})`, `System is up to date (${APP_VERSION_DISPLAY})`)}
                     </p>
-                    <p className="text-xs opacity-75 mt-0.5">
+                    <p className="text-[11px] sm:text-xs opacity-75 mt-0.5">
                       {t('上一次检测时间: ', 'Last checked: ')}
                       {updateInfo?.checked_at ? new Date(updateInfo.checked_at * 1000).toLocaleString() : t('刚刚', 'Just now')}
                     </p>
@@ -3708,7 +3719,7 @@ export default function App() {
                 <button
                   onClick={() => checkSystemUpdate(true)}
                   disabled={checkUpdateLoading}
-                  className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold cursor-pointer flex items-center gap-1.5 shadow-sm text-slate-700"
+                  className="w-full sm:w-auto justify-center px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold cursor-pointer flex items-center gap-1.5 shadow-sm text-slate-700"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${checkUpdateLoading ? 'animate-spin' : ''}`} />
                   <span>{t('重新检测', 'Re-check')}</span>
@@ -3728,8 +3739,8 @@ export default function App() {
               )}
 
               {/* Server Upgrade Guide */}
-              <div className="flex flex-col gap-2.5 bg-slate-50 border border-slate-200 rounded-lg p-4">
-                <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2.5 bg-slate-50 border border-slate-200 rounded-lg p-3.5 sm:p-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-0">
                   <span className="text-xs font-bold text-slate-800 font-mono">
                     {t('① 服务端一键平滑升级', 'Server One-Click Smooth Upgrade')}
                   </span>
@@ -3795,13 +3806,13 @@ export default function App() {
                   <summary className="text-[11px] text-slate-500 hover:text-slate-700 cursor-pointer">
                     {t('如未挂载 Socket，可查看终端平滑升级命令（备用）', 'View CLI upgrade command (Alternative)')}
                   </summary>
-                  <div className="mt-2 flex items-center gap-2">
-                    <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
+                  <div className="mt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto break-all">
                       curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/upgrade.sh | bash
                     </code>
                     <button
                       onClick={() => handleCopyText('curl -fsSL https://raw.githubusercontent.com/newbietan/FRP-ALL-IN-ONE/main/deploy/upgrade.sh | bash')}
-                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                      className="w-full sm:w-auto justify-center px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
                     >
                       <Copy className="w-3.5 h-3.5" />
                       <span>{t('复制', 'Copy')}</span>
@@ -3811,8 +3822,8 @@ export default function App() {
               </div>
 
               {/* Outdated Clients Summary */}
-              <div className="flex flex-col gap-2 bg-sky-50/60 border border-sky-200 rounded-lg p-4">
-                <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 bg-sky-50/60 border border-sky-200 rounded-lg p-3.5 sm:p-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
                   <div>
                     <span className="text-xs font-bold text-sky-900 font-mono">
                       {t('② 客户端设备升级情况', 'Client Devices Update Status')}
@@ -3825,7 +3836,7 @@ export default function App() {
                     <button
                       onClick={handleBatchUpgradeAgents}
                       disabled={batchUpgrading}
-                      className="px-3 py-1.5 bg-[#006782] hover:bg-[#005166] text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      className="w-full sm:w-auto justify-center px-3 py-1.5 bg-[#006782] hover:bg-[#005166] text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
                       <span>{batchUpgrading ? t('正在下发...', 'Sending...') : t('批量下发升级信号', 'Broadcast Upgrade')}</span>
@@ -3837,7 +3848,7 @@ export default function App() {
               <div className="flex justify-end gap-3 border-t border-border-subtle pt-3">
                 <button
                   onClick={() => setUpdateModalOpen(false)}
-                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+                  className="w-full sm:w-auto px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors text-center"
                 >
                   {t('关闭', 'Close')}
                 </button>
@@ -3856,13 +3867,13 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
           >
             <motion.div
               initial={{ scale: 0.95, y: 15 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
-              className="bg-white w-full max-w-lg rounded-2xl border border-slate-200/80 p-6 flex flex-col gap-4 shadow-2xl text-left"
+              className="bg-white w-full max-w-lg rounded-2xl border border-slate-200/80 p-4 sm:p-6 flex flex-col gap-4 shadow-2xl text-left max-h-[90vh] sm:max-h-[85vh] overflow-y-auto"
             >
               <div className="flex justify-between items-center border-b border-border-subtle pb-3">
                 <div className="flex items-center gap-2">
@@ -3879,7 +3890,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 grid grid-cols-2 gap-2 text-xs font-mono">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
                 <div>
                   <span className="text-slate-400">{t('当前版本: ', 'Current: ')}</span>
                   <span className="font-semibold text-slate-800">
@@ -4003,13 +4014,13 @@ export default function App() {
                   if (hasValidCmd) {
                     return (
                       <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <code className="flex-1 bg-slate-900 text-slate-100 p-2 rounded text-[11px] font-mono select-all overflow-x-auto break-all">
                             {cmdEntry.command}
                           </code>
                           <button
                             onClick={() => handleCopyText(cmdEntry.command)}
-                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
+                            className="w-full sm:w-auto justify-center px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold flex items-center gap-1 shrink-0 cursor-pointer"
                           >
                             <Copy className="w-3.5 h-3.5" />
                             <span>{t('复制', 'Copy')}</span>
@@ -4045,7 +4056,7 @@ export default function App() {
               <div className="flex justify-end gap-3 border-t border-border-subtle pt-3">
                 <button
                   onClick={() => setUpgradeTargetDevice(null)}
-                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+                  className="w-full sm:w-auto px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition-colors text-center"
                 >
                   {t('关闭', 'Close')}
                 </button>
